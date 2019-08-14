@@ -7,7 +7,6 @@ import math
 import matplotlib.pyplot as plt
 import csv
 from skimage.filters import threshold_otsu
-import cv2
 import os
 
 # try sharpening and others in cv2
@@ -96,37 +95,37 @@ def save_cells(section, section_name, result_file, save_folder):
         io.imsave(save_folder+section_name+"_"+(str(i)+".jpg"), cell_image) 
 
 
-section = io.imread("sample_astrocytes/3.jpg") # section.shape = (1920, 2560, 3)
-section_name = "3"
-result_file = 'sample_astrocytes/3.csv'
-save_folder = "all/"
+section = io.imread("1.tiff") # section.shape = (1920, 2560, 3)
+section_name = "1"
+result_file = 'result.csv'
+save_folder = "garima/"
 save_cells(section, section_name, result_file, save_folder)
 
-gray_section = rgb2gray(section) # gray_section.shape = (1920, 2560)
-gray_section = skimage.util.invert(gray_section)
-resized_section = skimage.transform.resize(gray_section, (512, 704)) # for tif images
-# resized_section = skimage.transform.resize(gray_section, (512, 704)) # for jpg images
-io.imshow(resized_section)
-io.show()
+# gray_section = rgb2gray(section) # gray_section.shape = (1920, 2560)
+# gray_section = skimage.util.invert(gray_section)
+# resized_section = skimage.transform.resize(gray_section, (512, 704)) # for tif images
+# # resized_section = skimage.transform.resize(gray_section, (512, 704)) # for jpg images
+# io.imshow(resized_section)
+# io.show()
 
-# thresh = threshold_otsu(resized_section)
-# resized_section = resized_section > thresh
-# black_pixel_coordinates = [(i,j) for (i, j), val in np.ndenumerate(circle) if val==0]
-# io.imsave(fname="", (600,600))
+# # thresh = threshold_otsu(resized_section)
+# # resized_section = resized_section > thresh
+# # black_pixel_coordinates = [(i,j) for (i, j), val in np.ndenumerate(circle) if val==0]
+# # io.imsave(fname="", (600,600))
 
-# cell_images = extract_cells(result_file, resized_section)
-# for i, cell_image in enumerate(cell_images):
-#     sholl(cell_image)
+# # cell_images = extract_cells(result_file, resized_section)
+# # for i, cell_image in enumerate(cell_images):
+# #     sholl(cell_image)
 
-for file in os.listdir('.'):
-    cell_image = io.imread(file)
-    gray_cell_image = rgb2gray(cell_image)
-    inverted_cell_image = skimage.util.invert(gray_cell_image)
-    sholl(inverted_cell_image, file)
+# for file in os.listdir('.'):
+#     cell_image = io.imread(file)
+#     gray_cell_image = rgb2gray(cell_image)
+#     inverted_cell_image = skimage.util.invert(gray_cell_image)
+#     sholl(inverted_cell_image, file)
 
-plt.xlabel("Distance from centre")
-plt.ylabel("Intensity")
-plt.savefig("sholl")
+# plt.xlabel("Distance from centre")
+# plt.ylabel("Intensity")
+# plt.savefig("sholl")
 
 
 
