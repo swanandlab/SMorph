@@ -3,6 +3,7 @@ import sklearn
 import scipy
 import numpy as np
 
+from skimage.transform import rescale
 from sklearn import preprocessing
 from sklearn import linear_model
 from sklearn.decomposition import PCA
@@ -46,11 +47,12 @@ def distance(P1, P2):
 
 class Cell:
 
-    def __init__(self, cell_image, threshold_val=0.5):
+    def __init__(self, cell_image, reference_image=None):
         self.cell_image = cell_image
-        self.inverted_cell_image = skimage.util.invert(cell_image)
         self.gray_cell_image = skimage.color.rgb2gray(self.cell_image)
-        self.threshold_image = self.threshold_image(threshold_val)
+        self.inverted_gray_cell_image = skimage.util.invert(self.gray_cell_image)
+        self.reference_image = reference_image
+        self.threshold_image = self.threshold_image()
         self.inverted_threshold_image = skimage.util.invert(self.threshold_image)
         self.cleaned_image = self.remove_small_object_noise()
 
@@ -67,7 +69,7 @@ class Cell:
 
     def get_blobs(self):
         # dab stain
-        blobs_log = blob_log(self.inverted_cell_image, min_sigma=6, max_sigma=20, num_sigma=10, threshold=0.1, overlap=0.5)
+        blobs_log = blob_log(self.inverted_gray_cell_image, min_sigma=6, max_sigma=20, num_sigma=10, threshold=0.1, overlap=0.5)
         # confocal
     #     blobs_log = blob_log(inverted_cell_image, min_sigma=1, max_sigma=30, num_sigma=10, threshold=0.1, overlap=0)
     #     blobs_log = blob_dog(inverted_cell_image, max_sigma=30, threshold=0.1, overlap=0)
@@ -75,10 +77,10 @@ class Cell:
         
         blobs_list=[]
         
-        for blob in blobs_log:
-            blobs_list.append(np.delete(blob, 2))
+        # for blob in blobs_log:
+        #     blobs_list.append(np.delete(blob, 2))
             
-        return blobs_list
+        return blobs_log
 
 
     def eliminate_border_blobs(self, blobs_log):
@@ -118,6 +120,8 @@ class Cell:
     def get_soma(self):
         blobs = self.get_blobs()
         soma_blobs = self.eliminate_border_blobs(blobs)
+        print(blobs)
+        print(soma_blobs)
         if len(soma_blobs)==1:
             soma = list(soma_blobs.values())[0][:2]
         if len(soma_blobs)>1:
@@ -125,8 +129,17 @@ class Cell:
 
         return soma
 
-    def threshold_image(self, threshold_val):
-        thresholded_cell = self.gray_cell_image > threshold_val
+    def threshold_image(self):
+
+        if self.reference_image is not None:
+            self.gray_reference_image = skimage.color.rgb2gray(self.reference_image)
+            self.gray_cell_image = skimage.transform.match_histograms(self.gray_cell_image, self.gray_reference_image)
+
+        # Contrast stretching
+        p2, p98 = np.percentile(self.gray_cell_image, (2, 98))
+        img_rescale = skimage.exposure.rescale_intensity(self.gray_cell_image, in_range=(p2, p98))
+
+        thresholded_cell = img_rescale > threshold_otsu(img_rescale)
 
         # invert_thresholded_cell = skimage.util.invert(thresholded_cell)
 
@@ -135,10 +148,8 @@ class Cell:
     def label_objects(self):
 
         bw = closing(self.inverted_threshold_image, square(1))
-        # remove artifacts connected to image border
-        cleared = clear_border(bw)
         # label image regions
-        labelled_image, no_of_objects = skimage.measure.label(cleared, return_num=True)
+        labelled_image, no_of_objects = skimage.measure.label(bw, return_num=True)
         
         return labelled_image, no_of_objects 
 
@@ -161,10 +172,10 @@ class Cell:
 
 
 class Skeleton:
-    def __init__(self, cell_image, threshold_val):
+    def __init__(self, cell_image):
 
         self.cell_image = cell_image
-        self.astrocyte = Cell(cell_image, threshold_val)
+        self.astrocyte = Cell(cell_image)
         self.cleaned_image = self.astrocyte.cleaned_image
         self.soma = self.astrocyte.get_soma()
         self.cell_skeleton = self.skeletonization()
@@ -421,9 +432,9 @@ class Skeleton:
 
 
 class Sholl:
-    def __init__(self, cell_image, threshold_val):
+    def __init__(self, cell_image):
 
-        self.skeleton = Skeleton(cell_image, threshold_val)
+        self.skeleton = Skeleton(cell_image)
         self.cell_skeleton = self.skeleton.cell_skeleton
         self.soma_on_skeleton = self.skeleton.soma_on_skeleton
         self.sholl_results()
