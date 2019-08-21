@@ -672,6 +672,11 @@ class pca:
     def __init__(self, groups_folders):
         self.dataset = self.read_images(groups_folders)
         self.features = self.get_features()
+        self.feature_names = ['surface_area', 'total_length', 'convex_hull', 'no_of_forks', 'no_of_primary_branches', 'no_of_secondary_branches', 
+                                'no_of_tertiary_branches', 'no_of_quatenary_branches', 'avg_length_of_primary_branches', 'avg_length_of_secondary_branches', 
+                                'avg_length_of_tertiary_branches', 'avg_length_of_quatenary_branches', 'avg_length_of_terminal_branches', 
+                                'critical_radius', 'critical_value', 'enclosing_radius', 'ramification_index', 'skewness', 'coefficient_of_determination', 
+                                'sholl_regression_coefficient', 'regression_intercept']
 
 
     def save_features(self, feature_name, feature_value):
@@ -699,17 +704,22 @@ class pca:
 
     def get_features(self):
         dataset_features=[]
+        self.targets=[]
+
         for group_no, group in enumerate(self.dataset):
             group_features=[]
-            for cell_no, cell_image in enumerate(group):
-                print(group_no, cell_no)
-                cell_features=[]
 
+            for cell_no, cell_image in enumerate(group):
+                self.targets.append(group_no)
+
+                print(group_no, cell_no)
+
+                cell_features=[]
                 astrocyte = Cell(cell_image)
                 skeleton = Skeleton(cell_image)
                 sholl = Sholl(cell_image)
 
-                # print(astrocyte.cell_image.shape)
+                print(astrocyte.cell_image.shape)
 
                 # cell_features.append(astrocyte.entropy())
                 # cell_features.append(skeleton.complexity())
@@ -753,21 +763,48 @@ class pca:
         return dataset_features
 
 
-    def plot(self):
+    def plot(self, color_dict, label, marker):
 
         pca_object = PCA(2)
         print(self.features)
         # fit on data
         pca_object.fit(self.features)
         # access values and vectors
+        self.feature_significance = pca_object.components_
+        self.component_variance = pca_object.explained_variance_
+
         print(pca_object.components_)
         print(pca_object.explained_variance_)
         # transform data
         projected = pca_object.transform(self.features)
+        Xax=projected[:,0]
+        Yax=projected[:,1]
 
-        plt.scatter(projected[:, 0], projected[:, 1], edgecolor='none', alpha=0.5)
-        plt.xlabel('component 1')
-        plt.ylabel('component 2')
+        fig,ax=plt.subplots(figsize=(7,5))
+        fig.patch.set_facecolor('white')
+        for l in np.unique(self.targets):
+            ix=np.where(self.targets==l)
+            ax.scatter(Xax[ix], Yax[ix], c=color_dict[l], s=40, label=label[l], marker=marker[l])
+        # for loop ends
+        plt.xlabel("1st Principal Component",fontsize=14)
+        plt.ylabel("2nd Principal Component",fontsize=14)
+        plt.legend()
+        plt.show()
+
+
+        # plt.scatter(projected[:, 0], projected[:, 1], edgecolor='none', alpha=0.5)
+        # plt.xlabel('component 1')
+        # plt.ylabel('component 2')
+
+
+    def plot_feature_significance(self):
+
+        plt.matshow(self.feature_significance, cmap='viridis')
+        plt.yticks([0,1], ['1st Comp','2nd Comp'], fontsize=10)
+        plt.colorbar()
+        plt.xticks(range(len(self.feature_names)), self.feature_names, rotation=65, ha='left')
+        plt.tight_layout()
+        plt.show()
 
 
 
