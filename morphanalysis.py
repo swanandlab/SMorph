@@ -29,6 +29,7 @@ from skimage.morphology import closing, square, remove_small_objects
 from skimage.color import label2rgb
 import matplotlib.patches as mpatches
 from skimage.filters import threshold_otsu
+from sklearn.preprocessing import StandardScaler
 
 import skan
 from skan.pre import threshold
@@ -466,14 +467,21 @@ class Skeleton:
 
 
 class Sholl:
-    def __init__(self, cell_image):
+    def __init__(self, cell_image, group_y, group_x):
 
         self.skeleton = Skeleton(cell_image)
         self.bounded_skeleton = self.skeleton.bounded_skeleton
         self.padded_skeleton = self.skeleton.padded_skeleton
         self.soma_on_padded_skeleton = self.skeleton.soma_on_padded_skeleton
         self.sholl_results()
+
+
+        self.group_y = group_y
+        self.group_x = group_x
+
+
         self.polynomial_model = self.polynomial_fit()
+
 
         
     def concentric_coords_and_values(self):
@@ -494,7 +502,7 @@ class Sholl:
 
         return concentric_coordinates, concentric_coordinates_intensities
     
-    def sholl_results(self, plot=True):
+    def sholl_results(self, plot=False):
         xs = []
         ys = []
         concentric_coordinates, concentric_intensities = self.concentric_coords_and_values()
@@ -531,7 +539,7 @@ class Sholl:
             plt.ylabel("No. of intersections") 
             plt.show()
     
-    def polynomial_fit(self, plot=False):
+    def polynomial_fit(self, plot=True):
         # Linear
         y_data = self.no_of_intersections
         reshaped_x = self.distances_from_soma.reshape((-1, 1))
@@ -546,6 +554,13 @@ class Sholl:
             # predict y from the data
             x_new = self.distances_from_soma
             y_new = self.polynomial_model.predict(x_)
+
+
+
+            self.group_y.append(y_new)
+            self.group_x.append(x_new)
+
+
 
             # plot the results
             plt.figure(figsize=(4, 3))
@@ -673,7 +688,7 @@ class pca:
         self.dataset = self.read_images(groups_folders)
         self.features = self.get_features()
         self.feature_names = ['surface_area', 'total_length', 'convex_hull', 'no_of_forks', 'no_of_primary_branches', 'no_of_secondary_branches', 
-                                'no_of_tertiary_branches', 'no_of_quatenary_branches', 'avg_length_of_primary_branches', 'avg_length_of_secondary_branches', 
+                                'no_of_tertiary_branches', 'no_of_quatenary_branches', 'no__of_terminal_branches', 'avg_length_of_primary_branches', 'avg_length_of_secondary_branches', 
                                 'avg_length_of_tertiary_branches', 'avg_length_of_quatenary_branches', 'avg_length_of_terminal_branches', 
                                 'critical_radius', 'critical_value', 'enclosing_radius', 'ramification_index', 'skewness', 'coefficient_of_determination', 
                                 'sholl_regression_coefficient', 'regression_intercept']
@@ -706,20 +721,24 @@ class pca:
         dataset_features=[]
         self.targets=[]
 
+        group_sholl=[]
         for group_no, group in enumerate(self.dataset):
             group_features=[]
+
+            group_y=[]
+            group_x=[]
 
             for cell_no, cell_image in enumerate(group):
                 self.targets.append(group_no)
 
-                print(group_no, cell_no)
+                # print(group_no, cell_no)
 
                 cell_features=[]
                 astrocyte = Cell(cell_image)
                 skeleton = Skeleton(cell_image)
-                sholl = Sholl(cell_image)
+                sholl = Sholl(cell_image, group_y, group_x)
 
-                print(astrocyte.cell_image.shape)
+                # print(astrocyte.cell_image.shape)
 
                 # cell_features.append(astrocyte.entropy())
                 # cell_features.append(skeleton.complexity())
@@ -760,50 +779,114 @@ class pca:
 
             dataset_features.extend(group_features)
 
+            group_sholl.append([group_y, group_x])
+
+        plt.figure(figsize=(9, 8))
+        ax = plt.axes()
+
+        kk=0
+        for x, y in zip(group_sholl[0][0], group_sholl[0][1]):
+            
+            if kk==0:
+                ax.plot(y, x, color='red', label='Knockout')
+            else:
+                ax.plot(y, x, color='red')
+
+            kk+=1
+            ax.set_xlabel('x')
+            ax.set_ylabel('y')
+
+        jj=0
+        for x, y in zip(group_sholl[1][0], group_sholl[1][1]):
+            
+            if jj==0:
+                ax.plot(y, x, color='green', label='Control')
+            else:
+                ax.plot(y, x, color='green')
+            jj+=1
+
+            ax.set_xlabel('Distances from soma')
+            ax.set_ylabel('No. of intersections')
+
+        ax.legend(loc='upper right')
+
+        plt.show()
+
         return dataset_features
 
 
     def plot(self, color_dict, label, marker):
 
         pca_object = PCA(2)
-        print(self.features)
+
+        # Scale data
+        scaler = StandardScaler()
+        scaler.fit(self.features)
+        X=scaler.transform(self.features) 
+
         # fit on data
-        pca_object.fit(self.features)
+        pca_object.fit(X)
         # access values and vectors
         self.feature_significance = pca_object.components_
-        self.component_variance = pca_object.explained_variance_
 
-        print(pca_object.components_)
-        print(pca_object.explained_variance_)
+        first_component_var = round(pca_object.explained_variance_ratio_[0], 2)*100
+        second_component_var = round(pca_object.explained_variance_ratio_[1], 2)*100
+
         # transform data
-        projected = pca_object.transform(self.features)
-        Xax=projected[:,0]
-        Yax=projected[:,1]
+        self.projected = pca_object.transform(X)
+        Xax=self.projected[:,0]
+        Yax=self.projected[:,1]
 
-        fig,ax=plt.subplots(figsize=(7,5))
+        fig, ax=plt.subplots(figsize=(7,5))
         fig.patch.set_facecolor('white')
         for l in np.unique(self.targets):
             ix=np.where(self.targets==l)
             ax.scatter(Xax[ix], Yax[ix], c=color_dict[l], s=40, label=label[l], marker=marker[l])
         # for loop ends
-        plt.xlabel("1st Principal Component",fontsize=14)
-        plt.ylabel("2nd Principal Component",fontsize=14)
+        plt.xlabel("PC 1 (Variance: "+str(first_component_var)+"%)",fontsize=14)
+        plt.ylabel("PC 2 (Variance: "+str(second_component_var)+"%)",fontsize=14)
         plt.legend()
         plt.show()
 
 
-        # plt.scatter(projected[:, 0], projected[:, 1], edgecolor='none', alpha=0.5)
-        # plt.xlabel('component 1')
-        # plt.ylabel('component 2')
+    def plot_feature_significance_heatmap(self):
 
+        sorted_significance_order = np.flip(np.argsort(self.feature_significance[0]))
+        sorted_feature_significance=np.zeros(self.feature_significance.shape)
+        sorted_feature_significance[0] = np.array(self.feature_significance[0])[sorted_significance_order]
+        sorted_feature_significance[1] = np.array(self.feature_significance[1])[sorted_significance_order]
+        sorted_feature_names = np.array(self.feature_names)[sorted_significance_order]
 
-    def plot_feature_significance(self):
-
-        plt.matshow(self.feature_significance, cmap='viridis')
+        plt.matshow(np.array(sorted_feature_significance), cmap='viridis')
         plt.yticks([0,1], ['1st Comp','2nd Comp'], fontsize=10)
         plt.colorbar()
-        plt.xticks(range(len(self.feature_names)), self.feature_names, rotation=65, ha='left')
+        plt.xticks(range(len(sorted_feature_names)), sorted_feature_names, rotation=65, ha='left')
         plt.tight_layout()
+        plt.show()
+
+    def plot_feature_significance_vectors(self):
+
+        score = self.projected
+        coeff = np.transpose(self.feature_significance)
+        labels=self.feature_names
+        xs = score[:,0]
+        ys = score[:,1]
+        n = coeff.shape[0]
+        scalex = 1.0/(xs.max() - xs.min())
+        scaley = 1.0/(ys.max() - ys.min())
+
+        plt.figure(figsize=(10, 9))
+        ax = plt.axes()
+        ax.scatter(xs * scalex,ys * scaley, c = self.targets)
+        for i in range(n):
+            ax.arrow(0, 0, coeff[i,0], coeff[i,1],color = 'r',alpha = 0.5)
+            if labels is None:
+                ax.text(coeff[i,0]* 1.15, coeff[i,1] * 1.15, "Var"+str(i+1), color = 'g', ha = 'center', va = 'center')
+            else:
+                ax.text(coeff[i,0]* 1.15, coeff[i,1] * 1.15, labels[i], color = 'g', ha = 'center', va = 'center')
+        ax.set_xlabel("PC {}".format(1))
+        ax.set_ylabel("PC {}".format(2))
+        ax.axis('tight')
         plt.show()
 
 
