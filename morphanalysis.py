@@ -75,38 +75,17 @@ class Cell:
     #     blobs_log = blob_log(inverted_cell_image, min_sigma=1, max_sigma=30, num_sigma=10, threshold=0.1, overlap=0)
     #     blobs_log = blob_dog(inverted_cell_image, max_sigma=30, threshold=0.1, overlap=0)
     #     blobs_log = blob_doh(inverted_cell_image, max_sigma=30, threshold=0.2, overlap=0)
-        
-        blobs_list=[]
-        
-        # for blob in blobs_log:
-        #     blobs_list.append(np.delete(blob, 2))
             
         return blobs_log
 
 
-    def eliminate_border_blobs(self, blobs_log):
-        # find the blobs too close to border so as to eliminate them
-        blobs_dict = defaultdict()
-        for i, blob in enumerate(blobs_log):
-            blobs_dict[i] = blob
-            # y, x, r = blob
-            # image_border_x, image_border_y = self.cell_image.shape[0]//6, self.cell_image.shape[1]//6
-
-            # if x < image_border_x or x > 3*image_border_x or y < image_border_y or y > 3*image_border_y:
-            #     blobs_dict.pop(i)
-                
-        return blobs_dict
-
-
-    def centre_of_mass(self, blobs_dict):
+    def centre_of_mass(self, blobs):
         # find the blob with highest intensity value
         ixs = np.indices(self.gray_cell_image.shape)
-        # xms = []
-        # yms = []
-        # ms = []
+
         blob_intensities=[]
         blob_centres=[]
-        for i, blob in blobs_dict.items():
+        for blob in blobs:
             y, x, r = blob
             # Define an array of shape `[2, 1, 1]`, containing the center of the blob
             blob_center = np.array([y, x])[:, np.newaxis, np.newaxis]
@@ -116,25 +95,21 @@ class Cell:
             blob_avg_est = self.gray_cell_image[mask].mean()
             blob_intensities.append(blob_avg_est)
             blob_centres.append((y, x))
-            # yms.append(blob_avg_est*y)
-            # xms.append(blob_avg_est*x)
-            # ms.append(blob_avg_est)
-            # print(f'Blob {i}: Centre {(x, y)}, average value: {blob_avg_est:.2f}')
 
-        # return (sum(yms)/sum(ms), sum(xms)/sum(ms))
         return blob_centres[np.argmin(blob_intensities)]
 
 
     def get_soma(self):
-        blobs = self.get_blobs()
-        soma_blobs = self.eliminate_border_blobs(blobs)
-        if len(list(soma_blobs.values())) == 0:
+
+        soma_blobs = self.get_blobs()
+
+        if len(soma_blobs) == 0:
             fig, ax = plt.subplots()
             ax.set_axis_off()
             ax.imshow(self.cell_image)
 
         if len(soma_blobs)==1:
-            soma = list(soma_blobs.values())[0][:2]
+            soma = soma_blobs[0][:2]
         if len(soma_blobs)>1:
             soma = self.centre_of_mass(soma_blobs)
 
@@ -206,8 +181,11 @@ class Skeleton:
         x_min, x_max = min(skeleton_indices[1]), max(skeleton_indices[1])
         y_min, y_max = min(skeleton_indices[0]), max(skeleton_indices[0])
         self.bounded_skeleton = self.cell_skeleton[y_min:y_max, x_min:x_max]
-        pad_width = max(self.bounded_skeleton.shape)//3
+        pad_width = max(self.bounded_skeleton.shape)//2
 
+        self.bounded_skeleton_boundary = [x_min, x_max, y_min, y_max]
+
+        self.soma_on_bounded_skeleton = self.soma_on_skeleton[0]-y_min, self.soma_on_skeleton[1]-x_min
         self.soma_on_padded_skeleton = self.soma_on_skeleton[0]-y_min+pad_width, self.soma_on_skeleton[1]-x_min+pad_width
 
         return skimage.util.pad(self.bounded_skeleton, pad_width=pad_width, mode='constant')
@@ -467,31 +445,30 @@ class Skeleton:
 
 
 class Sholl:
-    def __init__(self, cell_image, group_y, group_x):
+    def __init__(self, cell_image, shell_step_size = 10):
+
+        self.shell_step_size = shell_step_size
 
         self.skeleton = Skeleton(cell_image)
         self.bounded_skeleton = self.skeleton.bounded_skeleton
+        self.soma_on_bounded_skeleton = self.skeleton.soma_on_bounded_skeleton
         self.padded_skeleton = self.skeleton.padded_skeleton
         self.soma_on_padded_skeleton = self.skeleton.soma_on_padded_skeleton
         self.sholl_results()
-
-
-        self.group_y = group_y
-        self.group_x = group_x
-
-
         self.polynomial_model = self.polynomial_fit()
-
 
         
     def concentric_coords_and_values(self):
+        
+        print("soma_on_bounded_skeleton", self.soma_on_bounded_skeleton)
+        print("bounded_skeleton.shape", self.bounded_skeleton.shape)
 
-        shell_step_size = (max(self.bounded_skeleton.shape)//2)//10
-        largest_radius=max(self.bounded_skeleton.shape)//2
-
+        largest_radius = np.max([self.soma_on_bounded_skeleton[1], abs(self.soma_on_bounded_skeleton[1]-self.bounded_skeleton.shape[1]), 
+            self.soma_on_bounded_skeleton[0], abs(self.soma_on_bounded_skeleton[0]-self.bounded_skeleton.shape[0])])
+        
         concentric_coordinates = defaultdict(list) # {100: [(10,10), ..] , 400: [(20,20), ..]}
         concentric_coordinates_intensities = defaultdict(list)
-        concentric_radiuses = [radius for radius in range(shell_step_size, largest_radius+1, shell_step_size)]
+        concentric_radiuses = [radius for radius in range(self.shell_step_size, largest_radius+self.shell_step_size, self.shell_step_size)]
 
         for (x, y), value in np.ndenumerate(self.padded_skeleton):
             for radius in concentric_radiuses:
@@ -501,8 +478,9 @@ class Sholl:
                     concentric_coordinates_intensities[radius].append(value)
 
         return concentric_coordinates, concentric_coordinates_intensities
-    
-    def sholl_results(self, plot=False):
+
+
+    def sholl_results(self, plot=True):
         xs = []
         ys = []
         concentric_coordinates, concentric_intensities = self.concentric_coords_and_values()
@@ -541,6 +519,11 @@ class Sholl:
     
     def polynomial_fit(self, plot=True):
         # Linear
+
+        # till last non-zero value
+        last_intersection_index = np.max(np.nonzero(self.no_of_intersections))
+        self.no_of_intersections = self.no_of_intersections[:last_intersection_index]
+        self.distances_from_soma = self.distances_from_soma[:last_intersection_index]
         y_data = self.no_of_intersections
         reshaped_x = self.distances_from_soma.reshape((-1, 1))
 
@@ -555,13 +538,6 @@ class Sholl:
             x_new = self.distances_from_soma
             y_new = self.polynomial_model.predict(x_)
 
-
-
-            self.group_y.append(y_new)
-            self.group_x.append(x_new)
-
-
-
             # plot the results
             plt.figure(figsize=(4, 3))
             ax = plt.axes()
@@ -575,9 +551,6 @@ class Sholl:
 
         return self.polynomial_model
 
-    # def polynomial_equation(self, z):
-    #     return self.polynomial_model.coef_[2] * z**3 + self.polynomial_model.coef_[1] * z**2 + self.polynomial_model.coef_[0]*z + self.polynomial_model.intercept_
-        
     def enclosing_radius(self):
         return self.distances_from_soma[len(self.no_of_intersections) - (self.no_of_intersections!=0)[::-1].argmax() - 1]
     
@@ -585,7 +558,7 @@ class Sholl:
         return self.distances_from_soma[np.argmax(self.polynomial_predicted_no_of_intersections)]
     
     def critical_value(self):
-        return round(max(self.polynomial_predicted_no_of_intersections), 2)
+        return round(np.max(self.polynomial_predicted_no_of_intersections), 2)
     
     def skewness(self):
         x_ = preprocessing.PolynomialFeatures(degree=3, include_bias=False).fit_transform(self.no_of_intersections.reshape((-1, 1)))
@@ -684,24 +657,32 @@ class Sholl:
 
 class pca:
 
-    def __init__(self, groups_folders):
-        self.dataset = self.read_images(groups_folders)
-        self.features = self.get_features()
+    def __init__(self, groups_folders, save_features=True):
+        dataset = self.read_images(groups_folders)
+        self.features = self.get_features(dataset)
         self.feature_names = ['surface_area', 'total_length', 'convex_hull', 'no_of_forks', 'no_of_primary_branches', 'no_of_secondary_branches', 
                                 'no_of_tertiary_branches', 'no_of_quatenary_branches', 'no__of_terminal_branches', 'avg_length_of_primary_branches', 'avg_length_of_secondary_branches', 
                                 'avg_length_of_tertiary_branches', 'avg_length_of_quatenary_branches', 'avg_length_of_terminal_branches', 
                                 'critical_radius', 'critical_value', 'enclosing_radius', 'ramification_index', 'skewness', 'coefficient_of_determination', 
                                 'sholl_regression_coefficient', 'regression_intercept']
 
+        if save_features==True:
+            self.save_features()
 
-    def save_features(self, feature_name, feature_value):
+    def save_features(self):
         directory = os.getcwd()+'/Features'
         if not os.path.exists(directory):
             os.mkdir(directory)
-        path = os.getcwd()+'/Features/'
 
-        with open(path+feature_name+'.txt', 'a') as text_file:
-            text_file.write(str(feature_value)+'\n')
+        def save_to_file(path, feature_name, feature_value):
+            path = os.getcwd()+'/Features/'
+            with open(path+feature_name+'.txt', 'a') as text_file:
+                text_file.write(str(feature_value)+'\n')
+
+        for group in features:
+            for cell_features in group:
+                for feature_no, feature_val in enumerate(cell_features):
+                    save_to_file(self.feature_names[feature_no], feature_val)
 
 
     def read_images(self, groups_folders):
@@ -717,100 +698,51 @@ class pca:
 
         return dataset
 
-    def get_features(self):
+    def get_features(self, dataset):
         dataset_features=[]
         self.targets=[]
 
-        group_sholl=[]
-        for group_no, group in enumerate(self.dataset):
+        for group_no, group in enumerate(dataset):
             group_features=[]
-
-            group_y=[]
-            group_x=[]
 
             for cell_no, cell_image in enumerate(group):
                 self.targets.append(group_no)
 
-                # print(group_no, cell_no)
-
                 cell_features=[]
                 astrocyte = Cell(cell_image)
                 skeleton = Skeleton(cell_image)
-                sholl = Sholl(cell_image, group_y, group_x)
-
-                # print(astrocyte.cell_image.shape)
+                sholl = Sholl(cell_image)
 
                 # cell_features.append(astrocyte.entropy())
                 # cell_features.append(skeleton.complexity())
 
                 cell_features.append(astrocyte.surface_area())
-                self.save_features('surface_area', astrocyte.surface_area())
                 cell_features.append(skeleton.total_length())
-                self.save_features('total_length', skeleton.total_length())
                 cell_features.append(skeleton.convex_hull())
-                self.save_features('convex_hull', skeleton.convex_hull())
                 cell_features.append(skeleton.get_no_of_forks())
-                self.save_features('no_of_forks', skeleton.get_no_of_forks())
                 cell_features.append(skeleton.get_primary_branches()[1])
-                self.save_features('no_of_primary_branches', skeleton.get_primary_branches()[1])
                 cell_features.append(skeleton.get_secondary_branches()[1])
-                self.save_features('no_of_secondary_branches', skeleton.get_secondary_branches()[1])
                 cell_features.append(skeleton.get_tertiary_branches()[1])
-                self.save_features('no_of_tertiary_branches', skeleton.get_tertiary_branches()[1])
                 cell_features.append(skeleton.get_quatenary_branches()[1])
-                self.save_features('no_of_quatenary_branches', skeleton.get_quatenary_branches()[1])
                 cell_features.append(skeleton.get_terminal_branches()[1])
                 cell_features.append(skeleton.get_primary_branches()[2])
                 cell_features.append(skeleton.get_secondary_branches()[2])
                 cell_features.append(skeleton.get_tertiary_branches()[2])
                 cell_features.append(skeleton.get_quatenary_branches()[2])
                 cell_features.append(skeleton.get_terminal_branches()[2])
-            
+    
                 cell_features.append(sholl.critical_radius())
                 cell_features.append(sholl.critical_value())
                 cell_features.append(sholl.enclosing_radius())
                 cell_features.append(sholl.schoenen_ramification_index())
                 cell_features.append(sholl.skewness())
-                cell_features.append(sholl.coefficient_of_determination())
+                # cell_features.append(sholl.coefficient_of_determination())
                 cell_features.append(sholl.sholl_regression_coefficient())
-                cell_features.append(sholl.regression_intercept())
+                # cell_features.append(sholl.regression_intercept())
                 
                 group_features.append(cell_features)
 
             dataset_features.extend(group_features)
-
-            group_sholl.append([group_y, group_x])
-
-        plt.figure(figsize=(9, 8))
-        ax = plt.axes()
-
-        kk=0
-        for x, y in zip(group_sholl[0][0], group_sholl[0][1]):
-            
-            if kk==0:
-                ax.plot(y, x, color='red', label='Knockout')
-            else:
-                ax.plot(y, x, color='red')
-
-            kk+=1
-            ax.set_xlabel('x')
-            ax.set_ylabel('y')
-
-        jj=0
-        for x, y in zip(group_sholl[1][0], group_sholl[1][1]):
-            
-            if jj==0:
-                ax.plot(y, x, color='green', label='Control')
-            else:
-                ax.plot(y, x, color='green')
-            jj+=1
-
-            ax.set_xlabel('Distances from soma')
-            ax.set_ylabel('No. of intersections')
-
-        ax.legend(loc='upper right')
-
-        plt.show()
 
         return dataset_features
 
@@ -861,7 +793,6 @@ class pca:
         plt.yticks([0,1], ['1st Comp','2nd Comp'], fontsize=10)
         plt.colorbar()
         plt.xticks(range(len(sorted_feature_names)), sorted_feature_names, rotation=65, ha='left')
-        plt.tight_layout()
         plt.show()
 
     def plot_feature_significance_vectors(self):
@@ -886,7 +817,6 @@ class pca:
                 ax.text(coeff[i,0]* 1.15, coeff[i,1] * 1.15, labels[i], color = 'g', ha = 'center', va = 'center')
         ax.set_xlabel("PC {}".format(1))
         ax.set_ylabel("PC {}".format(2))
-        ax.axis('tight')
         plt.show()
 
 
