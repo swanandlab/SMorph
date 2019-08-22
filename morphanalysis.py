@@ -21,7 +21,6 @@ import copy
 import os
 import pylab as pl
 from matplotlib import collections as mc
-from math import sqrt
 from skimage.feature import blob_dog, blob_log, blob_doh
 from skimage.segmentation import clear_border
 from skimage.measure import regionprops
@@ -459,12 +458,9 @@ class Sholl:
 
         
     def concentric_coords_and_values(self):
-        
-        print("soma_on_bounded_skeleton", self.soma_on_bounded_skeleton)
-        print("bounded_skeleton.shape", self.bounded_skeleton.shape)
 
-        largest_radius = np.max([self.soma_on_bounded_skeleton[1], abs(self.soma_on_bounded_skeleton[1]-self.bounded_skeleton.shape[1]), 
-            self.soma_on_bounded_skeleton[0], abs(self.soma_on_bounded_skeleton[0]-self.bounded_skeleton.shape[0])])
+        largest_radius = int(1.4*(np.max([self.soma_on_bounded_skeleton[1], abs(self.soma_on_bounded_skeleton[1]-self.bounded_skeleton.shape[1]), 
+            self.soma_on_bounded_skeleton[0], abs(self.soma_on_bounded_skeleton[0]-self.bounded_skeleton.shape[0])])))
         
         concentric_coordinates = defaultdict(list) # {100: [(10,10), ..] , 400: [(20,20), ..]}
         concentric_coordinates_intensities = defaultdict(list)
@@ -516,16 +512,18 @@ class Sholl:
             plt.xlabel("Distance from centre")
             plt.ylabel("No. of intersections") 
             plt.show()
-    
+
+
     def polynomial_fit(self, plot=True):
         # Linear
 
         # till last non-zero value
         last_intersection_index = np.max(np.nonzero(self.no_of_intersections))
-        self.no_of_intersections = self.no_of_intersections[:last_intersection_index]
-        self.distances_from_soma = self.distances_from_soma[:last_intersection_index]
-        y_data = self.no_of_intersections
-        reshaped_x = self.distances_from_soma.reshape((-1, 1))
+        self.non_zero_no_of_intersections = self.no_of_intersections[:last_intersection_index]
+        self.non_zero_distances_from_soma = self.distances_from_soma[:last_intersection_index]
+
+        y_data = self.non_zero_no_of_intersections
+        reshaped_x = self.non_zero_distances_from_soma.reshape((-1, 1))
 
         x_ = preprocessing.PolynomialFeatures(degree=3, include_bias=False).fit_transform(reshaped_x)
         # create a linear regression model
@@ -535,7 +533,7 @@ class Sholl:
 
         if plot==True:
             # predict y from the data
-            x_new = self.distances_from_soma
+            x_new = self.non_zero_distances_from_soma
             y_new = self.polynomial_model.predict(x_)
 
             # plot the results
@@ -552,16 +550,16 @@ class Sholl:
         return self.polynomial_model
 
     def enclosing_radius(self):
-        return self.distances_from_soma[len(self.no_of_intersections) - (self.no_of_intersections!=0)[::-1].argmax() - 1]
+        return self.non_zero_distances_from_soma[len(self.non_zero_no_of_intersections) - (self.non_zero_no_of_intersections!=0)[::-1].argmax() - 1]
     
     def critical_radius(self):
-        return self.distances_from_soma[np.argmax(self.polynomial_predicted_no_of_intersections)]
+        return self.non_zero_distances_from_soma[np.argmax(self.polynomial_predicted_no_of_intersections)]
     
     def critical_value(self):
         return round(np.max(self.polynomial_predicted_no_of_intersections), 2)
     
     def skewness(self):
-        x_ = preprocessing.PolynomialFeatures(degree=3, include_bias=False).fit_transform(self.no_of_intersections.reshape((-1, 1)))
+        x_ = preprocessing.PolynomialFeatures(degree=3, include_bias=False).fit_transform(self.non_zero_no_of_intersections.reshape((-1, 1)))
         return round(scipy.stats.skew(self.polynomial_model.predict(x_)), 2)
     
     def schoenen_ramification_index(self):
@@ -571,12 +569,12 @@ class Sholl:
     
     def semi_log(self, plot=False):
         # no. of intersections/circumference
-        normalized_y = np.log(self.no_of_intersections/(2*math.pi*self.distances_from_soma))
-        reshaped_x = self.distances_from_soma.reshape((-1, 1))
+        normalized_y = np.log(self.non_zero_no_of_intersections/(2*math.pi*self.non_zero_distances_from_soma))
+        reshaped_x = self.non_zero_distances_from_soma.reshape((-1, 1))
         model = linear_model.LinearRegression().fit(reshaped_x, normalized_y)
 
         # predict y from the data
-        x_new = self.distances_from_soma
+        x_new = self.non_zero_distances_from_soma
         y_new = model.predict(reshaped_x)
 
         if plot==True:
@@ -598,8 +596,8 @@ class Sholl:
     def log_log(self, plot=False):
     
         # no. of intersections/circumference
-        normalized_y = np.log(self.no_of_intersections/(2*math.pi*self.distances_from_soma))
-        reshaped_x = self.distances_from_soma.reshape((-1, 1))
+        normalized_y = np.log(self.non_zero_no_of_intersections/(2*math.pi*self.non_zero_distances_from_soma))
+        reshaped_x = self.non_zero_distances_from_soma.reshape((-1, 1))
         normalized_x = np.log(reshaped_x)
         model = linear_model.LinearRegression().fit(normalized_x, normalized_y)
 
@@ -657,7 +655,7 @@ class Sholl:
 
 class pca:
 
-    def __init__(self, groups_folders, save_features=True):
+    def __init__(self, groups_folders, save_features=True, save_sholl_plots=True):
         dataset = self.read_images(groups_folders)
         self.features = self.get_features(dataset)
         self.feature_names = ['surface_area', 'total_length', 'convex_hull', 'no_of_forks', 'no_of_primary_branches', 'no_of_secondary_branches', 
@@ -669,41 +667,39 @@ class pca:
         if save_features==True:
             self.save_features()
 
-    def save_features(self):
-        directory = os.getcwd()+'/Features'
-        if not os.path.exists(directory):
-            os.mkdir(directory)
-
-        def save_to_file(path, feature_name, feature_value):
-            path = os.getcwd()+'/Features/'
-            with open(path+feature_name+'.txt', 'a') as text_file:
-                text_file.write(str(feature_value)+'\n')
-
-        for group in features:
-            for cell_features in group:
-                for feature_no, feature_val in enumerate(cell_features):
-                    save_to_file(self.feature_names[feature_no], feature_val)
+        if save_sholl_plots==True:
+            print("__init__")
+            self.save_sholl_plots()
 
 
     def read_images(self, groups_folders):
+        self.file_names=[]
         dataset=[]
         for group in groups_folders:
             group_data=[]
             for file in os.listdir(group):
                 if not file.startswith('.'):
                     print(group+'/'+file)
+                    self.file_names.append((group+'/'+file))
                     image = io.imread(group+'/'+file)
                     group_data.append(image)
             dataset.append(group_data)
 
         return dataset
 
+
     def get_features(self, dataset):
         dataset_features=[]
         self.targets=[]
 
+        if self.save_sholl_plots==True:
+            print("get features")
+            self.sholl_original_plots=[]
+            self.sholl_polynomial_plots=[]
+            self.polynomial_models=[]
+            
+
         for group_no, group in enumerate(dataset):
-            group_features=[]
 
             for cell_no, cell_image in enumerate(group):
                 self.targets.append(group_no)
@@ -736,15 +732,61 @@ class pca:
                 cell_features.append(sholl.enclosing_radius())
                 cell_features.append(sholl.schoenen_ramification_index())
                 cell_features.append(sholl.skewness())
-                # cell_features.append(sholl.coefficient_of_determination())
+                cell_features.append(sholl.coefficient_of_determination())
                 cell_features.append(sholl.sholl_regression_coefficient())
-                # cell_features.append(sholl.regression_intercept())
+                cell_features.append(sholl.regression_intercept())
+
+                if self.save_sholl_plots==True:
+                    print("per cell")
+                    self.sholl_original_plots.append((sholl.distances_from_soma, sholl.no_of_intersections))
+                    self.sholl_polynomial_plots.append(sholl.non_zero_distances_from_soma, sholl.non_zero_no_of_intersections)
+                    self.polynomial_models.append(sholl.polynomial_model)
                 
-                group_features.append(cell_features)
+                dataset_features.append(cell_features)
 
-            dataset_features.extend(group_features)
-
+        print(dataset_features)
         return dataset_features
+
+
+    def save_features(self):
+        directory = os.getcwd()+'/Features'
+        if not os.path.exists(directory):
+            os.mkdir(directory)
+
+        def save_to_file(file_name, feature_name, feature_value):
+            path = os.getcwd()+'/Features/'
+            with open(path+feature_name+'.txt', 'a') as text_file:
+                text_file.write("{} {} \n".format(file_name, feature_value))
+
+        for cell_no, cell_features in enumerate(self.features):
+            for feature_no, feature_val in enumerate(cell_features):
+                save_to_file(self.file_names[cell_no], self.feature_names[feature_no], feature_val)
+
+
+    def save_sholl_plots(self):
+
+        original_plots_file = 'Original plots'
+        polynomial_plots_file = 'Polynomial plots'
+        polynomial_models_file = 'Polynomial models'
+
+        directory = os.getcwd()+'/Sholl Results'
+        if not os.path.exists(directory):
+            os.mkdir(directory)
+
+        path = os.getcwd()+'/Sholl Results/'
+
+        with open(path+original_plots_file, 'w+') as text_file:
+            for plot in self.sholl_original_plots:
+                text_file.write("{} {} \n".format(plot[0], plot[1]))
+
+        with open(path+polynomial_plots_file, 'w+') as text_file:
+            for plot in self.sholl_polynomial_plots:
+                text_file.write("{} {} \n".format(plot[0], plot[1]))
+
+        with open(path+polynomial_models_file, 'wb') as pickle_file:
+            for model in self.polynomial_models:
+                pickle.dump(model, pickle_file)
+
 
 
     def plot(self, color_dict, label, marker):
@@ -818,9 +860,6 @@ class pca:
         ax.set_xlabel("PC {}".format(1))
         ax.set_ylabel("PC {}".format(2))
         plt.show()
-
-
-
 
 
 
