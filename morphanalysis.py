@@ -1,40 +1,36 @@
+import os
+import copy
+import pickle
+import math
 import skimage
 import sklearn
 import scipy
 import numpy as np
 
+from collections import defaultdict
+import matplotlib.pyplot as plt
+from matplotlib.patches import Ellipse
+
+import skimage.io as io
+from skimage.color import rgb2gray
 from skimage.transform import rescale
+from skimage.feature import blob_dog, blob_log, blob_doh
+from skimage.morphology import closing, square
+from skimage.filters import threshold_otsu
+
+import skan
+from skan import draw
+from skan import skeleton_to_csgraph
+
 from sklearn import preprocessing
+from sklearn.preprocessing import StandardScaler, RobustScaler, MaxAbsScaler
 from sklearn import linear_model
 from sklearn.decomposition import PCA
 
 import shearlexity
 from FFST import shearletTransformSpect
 
-import skimage.io as io
-from skimage.color import rgb2gray
-from collections import defaultdict
-import math
-import matplotlib.pyplot as plt
-import csv
-import copy
-import os
-import pylab as pl
-from matplotlib import collections as mc
-from skimage.feature import blob_dog, blob_log, blob_doh
-from skimage.segmentation import clear_border
-from skimage.measure import regionprops
-from skimage.morphology import closing, square, remove_small_objects
-from skimage.color import label2rgb
-import matplotlib.patches as mpatches
-from skimage.filters import threshold_otsu
-from sklearn.preprocessing import StandardScaler
 
-import skan
-from skan.pre import threshold
-from skan import draw
-from skan import skeleton_to_csgraph
-from skan import Skeleton, summarize
 
 
 def distance(P1, P2):
@@ -444,9 +440,10 @@ class Skeleton:
 
 
 class Sholl:
-    def __init__(self, cell_image, shell_step_size = 10):
+    def __init__(self, cell_image, shell_step_size = 10, polynomial_degree=3):
 
         self.shell_step_size = shell_step_size
+        self.polynomial_degree = polynomial_degree
 
         self.skeleton = Skeleton(cell_image)
         self.bounded_skeleton = self.skeleton.bounded_skeleton
@@ -459,12 +456,12 @@ class Sholl:
         
     def concentric_coords_and_values(self):
 
-        largest_radius = int(1.4*(np.max([self.soma_on_bounded_skeleton[1], abs(self.soma_on_bounded_skeleton[1]-self.bounded_skeleton.shape[1]), 
+        largest_radius = int(1.3*(np.max([self.soma_on_bounded_skeleton[1], abs(self.soma_on_bounded_skeleton[1]-self.bounded_skeleton.shape[1]), 
             self.soma_on_bounded_skeleton[0], abs(self.soma_on_bounded_skeleton[0]-self.bounded_skeleton.shape[0])])))
         
         concentric_coordinates = defaultdict(list) # {100: [(10,10), ..] , 400: [(20,20), ..]}
         concentric_coordinates_intensities = defaultdict(list)
-        concentric_radiuses = [radius for radius in range(self.shell_step_size, largest_radius+self.shell_step_size, self.shell_step_size)]
+        concentric_radiuses = [radius for radius in range(self.shell_step_size, largest_radius, self.shell_step_size)]
 
         for (x, y), value in np.ndenumerate(self.padded_skeleton):
             for radius in concentric_radiuses:
@@ -525,7 +522,7 @@ class Sholl:
         y_data = self.non_zero_no_of_intersections
         reshaped_x = self.non_zero_distances_from_soma.reshape((-1, 1))
 
-        x_ = preprocessing.PolynomialFeatures(degree=3, include_bias=False).fit_transform(reshaped_x)
+        x_ = preprocessing.PolynomialFeatures(degree=self.polynomial_degree, include_bias=False).fit_transform(reshaped_x)
         # create a linear regression model
         self.polynomial_model = linear_model.LinearRegression().fit(x_, y_data)
 
@@ -655,11 +652,13 @@ class Sholl:
 
 class pca:
 
-    def __init__(self, groups_folders, save_features=True, save_sholl_plots=True):
+    def __init__(self, groups_folders, save_features=True, save_sholl_results=True):
+        self.save_sholl_results = save_sholl_results
+
         dataset = self.read_images(groups_folders)
         self.features = self.get_features(dataset)
         self.feature_names = ['surface_area', 'total_length', 'convex_hull', 'no_of_forks', 'no_of_primary_branches', 'no_of_secondary_branches', 
-                                'no_of_tertiary_branches', 'no_of_quatenary_branches', 'no__of_terminal_branches', 'avg_length_of_primary_branches', 'avg_length_of_secondary_branches', 
+                                'no_of_tertiary_branches', 'no_of_quatenary_branches', 'no_of_terminal_branches', 'avg_length_of_primary_branches', 'avg_length_of_secondary_branches', 
                                 'avg_length_of_tertiary_branches', 'avg_length_of_quatenary_branches', 'avg_length_of_terminal_branches', 
                                 'critical_radius', 'critical_value', 'enclosing_radius', 'ramification_index', 'skewness', 'coefficient_of_determination', 
                                 'sholl_regression_coefficient', 'regression_intercept']
@@ -667,8 +666,7 @@ class pca:
         if save_features==True:
             self.save_features()
 
-        if save_sholl_plots==True:
-            print("__init__")
+        if save_sholl_results==True:
             self.save_sholl_plots()
 
 
@@ -692,8 +690,7 @@ class pca:
         dataset_features=[]
         self.targets=[]
 
-        if self.save_sholl_plots==True:
-            print("get features")
+        if self.save_sholl_results==True:
             self.sholl_original_plots=[]
             self.sholl_polynomial_plots=[]
             self.polynomial_models=[]
@@ -736,15 +733,13 @@ class pca:
                 cell_features.append(sholl.sholl_regression_coefficient())
                 cell_features.append(sholl.regression_intercept())
 
-                if self.save_sholl_plots==True:
-                    print("per cell")
+                if self.save_sholl_results==True:
                     self.sholl_original_plots.append((sholl.distances_from_soma, sholl.no_of_intersections))
-                    self.sholl_polynomial_plots.append(sholl.non_zero_distances_from_soma, sholl.non_zero_no_of_intersections)
+                    self.sholl_polynomial_plots.append((sholl.non_zero_distances_from_soma, sholl.non_zero_no_of_intersections))
                     self.polynomial_models.append(sholl.polynomial_model)
                 
                 dataset_features.append(cell_features)
 
-        print(dataset_features)
         return dataset_features
 
 
@@ -791,42 +786,103 @@ class pca:
 
     def plot(self, color_dict, label, marker):
 
+        def get_cov_ellipse(cov, centre, nstd, **kwargs):
+            """
+            Return a matplotlib Ellipse patch representing the covariance matrix
+            cov centred at centre and scaled by the factor nstd.
+
+            """
+
+            # Find and sort eigenvalues and eigenvectors into descending order
+            eigvals, eigvecs = np.linalg.eigh(cov)
+            order = eigvals.argsort()[::-1]
+            eigvals, eigvecs = eigvals[order], eigvecs[:, order]
+
+            # The anti-clockwise angle to rotate our ellipse by 
+            vx, vy = eigvecs[:,0][0], eigvecs[:,0][1]
+            theta = np.arctan2(vy, vx)
+
+            # Width and height of ellipse to draw
+            width, height = nstd * np.sqrt(eigvals)
+
+            return Ellipse(xy=centre, width=width, height=height,
+                           angle=np.degrees(theta), **kwargs)
+
+
         pca_object = PCA(2)
 
         # Scale data
-        scaler = StandardScaler()
+        # scaler = StandardScaler()
+        # scaler = RobustScaler()
+        scaler = MaxAbsScaler()
         scaler.fit(self.features)
         X=scaler.transform(self.features) 
+
+        # print(self.features)
+        # print(X)
 
         # fit on data
         pca_object.fit(X)
         # access values and vectors
         self.feature_significance = pca_object.components_
 
+        # print(self.feature_significance)
+
         first_component_var = round(pca_object.explained_variance_ratio_[0], 2)*100
         second_component_var = round(pca_object.explained_variance_ratio_[1], 2)*100
 
         # transform data
         self.projected = pca_object.transform(X)
-        Xax=self.projected[:,0]
-        Yax=self.projected[:,1]
+        first_component=self.projected[:,0]
+        second_component=self.projected[:,1]
 
-        fig, ax=plt.subplots(figsize=(7,5))
+        nstd = 1
+        fig, ax = plt.subplots()
+        # ax.add_artist(ell)
         fig.patch.set_facecolor('white')
         for l in np.unique(self.targets):
-            ix=np.where(self.targets==l)
-            ax.scatter(Xax[ix], Yax[ix], c=color_dict[l], s=40, label=label[l], marker=marker[l])
-        # for loop ends
+            ix = np.where(self.targets==l)
+            first_component_mean = np.mean(first_component[ix])
+            second_component_mean = np.mean(second_component[ix])
+            cov = np.cov(first_component, second_component)
+
+            ax.scatter(first_component[ix], second_component[ix], c=color_dict[l], s=40, label=label[l], marker=marker[l])
+
+            e = get_cov_ellipse(cov, (first_component_mean, second_component_mean), 3, fc=color_dict[l], alpha=0.4)
+            ax.add_artist(e)
+
+
         plt.xlabel("PC 1 (Variance: "+str(first_component_var)+"%)",fontsize=14)
         plt.ylabel("PC 2 (Variance: "+str(second_component_var)+"%)",fontsize=14)
         plt.legend()
         plt.show()
 
 
+    def plot_feature_histograms(self):
+
+        fig, axes = plt.subplots(11, 2, figsize=(15, 11)) # 3 columns each containing 10 figures, total 30 features
+        data = np.array(self.features)
+        ko = data[np.where(np.array(self.targets) == 0)[0]] # define ko
+        control = data[np.where(np.array(self.targets) == 1)[0]] # define control
+        ax=axes.ravel() # flat axes with numpy ravel
+
+        for i in range(len(self.feature_names)):
+            _, bins=np.histogram(data[:,i], bins=40)
+            ax[i].hist(ko[:,i], bins=bins, color='r',alpha=.5) # red color for malignant class
+            ax[i].hist(control[:,i], bins=bins, color='g',alpha=0.3) # alpha is for transparency in the overlapped region 
+            ax[i].set_title(self.feature_names[i],fontsize=9)
+            ax[i].axes.get_xaxis().set_visible(False) # the x-axis co-ordinates are not so useful, as we just want to look how well separated the histograms are
+            ax[i].set_yticks(())
+            
+        ax[0].legend(['ko','control'], loc='best', fontsize=8)
+        plt.tight_layout() # let's make good plots
+        plt.show()
+
+
     def plot_feature_significance_heatmap(self):
 
-        sorted_significance_order = np.flip(np.argsort(self.feature_significance[0]))
-        sorted_feature_significance=np.zeros(self.feature_significance.shape)
+        sorted_significance_order = np.argsort(self.feature_significance[0])
+        sorted_feature_significance = np.zeros(self.feature_significance.shape)
         sorted_feature_significance[0] = np.array(self.feature_significance[0])[sorted_significance_order]
         sorted_feature_significance[1] = np.array(self.feature_significance[1])[sorted_significance_order]
         sorted_feature_names = np.array(self.feature_names)[sorted_significance_order]
