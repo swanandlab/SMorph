@@ -43,8 +43,9 @@ def distance(P1, P2):
 
 class Cell:
 
-    def __init__(self, cell_image, reference_image=None):
+    def __init__(self, cell_image, image_type, reference_image=None):
         self.cell_image = cell_image
+        self.image_type = image_type
         self.gray_cell_image = skimage.color.rgb2gray(self.cell_image)
         self.inverted_gray_cell_image = skimage.util.invert(self.gray_cell_image)
         self.reference_image = reference_image
@@ -64,13 +65,30 @@ class Cell:
 
 
     def get_blobs(self):
-        # dab stain
-        blobs_log = blob_log(self.inverted_gray_cell_image, min_sigma=6, max_sigma=20, num_sigma=10, threshold=0.1, overlap=0.5)
-        # confocal
-    #     blobs_log = blob_log(inverted_cell_image, min_sigma=1, max_sigma=30, num_sigma=10, threshold=0.1, overlap=0)
-    #     blobs_log = blob_dog(inverted_cell_image, max_sigma=30, threshold=0.1, overlap=0)
-    #     blobs_log = blob_doh(inverted_cell_image, max_sigma=30, threshold=0.2, overlap=0)
-            
+
+        if self.image_type == "DAB":
+            blobs_log = blob_log(self.inverted_gray_cell_image, min_sigma=6, max_sigma=20, num_sigma=10, threshold=0.1, overlap=0.5)
+        elif self.image_type == "confocal":
+
+            blobs_log = blob_log(self.cell_image, min_sigma=3, max_sigma=20, num_sigma=10, threshold=0.1, overlap=0.5)
+            if len(blobs_log)<1:
+                blobs_log = blob_log(self.cell_image, min_sigma=2, max_sigma=20, num_sigma=10, threshold=0.1, overlap=0.5)
+
+            # find the blobs too close to border so as to eliminate them
+            blobs_dict = defaultdict()
+            for i, blob in enumerate(blobs_log):
+                blobs_dict[i] = np.take(blob, [0,1,3])
+                y, x, r = blobs_dict[i]
+                image_border_x, image_border_y = self.cell_image.shape[1]/5, self.cell_image.shape[0]/5
+                if x < image_border_x or x > 4*image_border_x or y < image_border_y or y > 4*image_border_y:
+                    blobs_dict.pop(i)
+
+            blobs_log=[]
+
+            for key, blobs in blobs_dict.items():
+                blobs_log.append(blobs)
+
+
         return blobs_log
 
 
@@ -80,6 +98,7 @@ class Cell:
 
         blob_intensities=[]
         blob_centres=[]
+        blob_radiuses=[]
         for blob in blobs:
             y, x, r = blob
             # Define an array of shape `[2, 1, 1]`, containing the center of the blob
@@ -90,18 +109,30 @@ class Cell:
             blob_avg_est = self.gray_cell_image[mask].mean()
             blob_intensities.append(blob_avg_est)
             blob_centres.append((y, x))
+            blob_radiuses.append(r)
 
-        return blob_centres[np.argmin(blob_intensities)]
+
+        if self.image_type == "DAB":
+            max_intensity = blob_centres[np.argmin(blob_intensities)]
+            return max_intensity
+        elif self.image_type == "confocal":
+            max_radius = blob_centres[np.argmax(blob_radiuses)]
+            max_intensity = blob_centres[np.argmax(blob_intensities)]
+
+            if len(blob_radiuses) > len(set(blob_radiuses)):
+                return max_intensity
+            else:
+                return max_radius
 
 
     def get_soma(self):
 
         soma_blobs = self.get_blobs()
 
-        if len(soma_blobs) == 0:
-            fig, ax = plt.subplots()
-            ax.set_axis_off()
-            ax.imshow(self.cell_image)
+        # if len(soma_blobs) == 0:
+        #     fig, ax = plt.subplots()
+        #     ax.set_axis_off()
+        #     ax.imshow(self.cell_image)
 
         if len(soma_blobs)==1:
             soma = soma_blobs[0][:2]
@@ -122,9 +153,11 @@ class Cell:
 
         thresholded_cell = img_rescale > threshold_otsu(img_rescale)
 
-        # invert_thresholded_cell = skimage.util.invert(thresholded_cell)
+        if self.image_type == "DAB":
+            return thresholded_cell
+        elif self.image_type == "confocal":
+            return skimage.util.invert(thresholded_cell)
 
-        return thresholded_cell
 
     def label_objects(self):
 
@@ -153,10 +186,10 @@ class Cell:
 
 
 class Skeleton:
-    def __init__(self, cell_image):
+    def __init__(self, cell_image, image_type):
 
         self.cell_image = cell_image
-        self.astrocyte = Cell(cell_image)
+        self.astrocyte = Cell(cell_image, image_type)
         self.cleaned_image = self.astrocyte.cleaned_image
         self.soma = self.astrocyte.get_soma()
         self.cell_skeleton = self.skeletonization()
@@ -322,12 +355,18 @@ class Skeleton:
                 near.append(nearest)
 
             soma_on_path = min(near, key=lambda x: distance(self.soma_on_skeleton, x))
-            soma_node = [i for i,j in enumerate(skan.csr.Skeleton(self.cell_skeleton).coordinates) if all(soma_on_path==j)]
+
+            for i,j in enumerate(skan.csr.Skeleton(self.cell_skeleton).coordinates):
+                if all(soma_on_path==j):
+                    soma_node = [i]
+                    break
+
             return soma_node 
 
         def get_soma_branches(soma_node, paths_list):    
             soma_branches=[]
             for path in paths_list:
+                # print(path)
                 if soma_node in path:
                     soma_branches.append(path)
             return soma_branches
@@ -440,12 +479,12 @@ class Skeleton:
 
 
 class Sholl:
-    def __init__(self, cell_image, shell_step_size = 10, polynomial_degree=3):
+    def __init__(self, cell_image, image_type, shell_step_size = 5, polynomial_degree=3):
 
         self.shell_step_size = shell_step_size
         self.polynomial_degree = polynomial_degree
 
-        self.skeleton = Skeleton(cell_image)
+        self.skeleton = Skeleton(cell_image, image_type)
         self.bounded_skeleton = self.skeleton.bounded_skeleton
         self.soma_on_bounded_skeleton = self.skeleton.soma_on_bounded_skeleton
         self.padded_skeleton = self.skeleton.padded_skeleton
@@ -473,7 +512,7 @@ class Sholl:
         return concentric_coordinates, concentric_coordinates_intensities
 
 
-    def sholl_results(self, plot=True):
+    def sholl_results(self, plot=False):
         xs = []
         ys = []
         concentric_coordinates, concentric_intensities = self.concentric_coords_and_values()
@@ -511,7 +550,7 @@ class Sholl:
             plt.show()
 
 
-    def polynomial_fit(self, plot=True):
+    def polynomial_fit(self, plot=False):
         # Linear
 
         # till last non-zero value
@@ -652,8 +691,9 @@ class Sholl:
 
 class pca:
 
-    def __init__(self, groups_folders, save_features=True, save_sholl_results=True):
+    def __init__(self, groups_folders, image_type, save_features=True, save_sholl_results=True):
         self.save_sholl_results = save_sholl_results
+        self.image_type = image_type
 
         dataset = self.read_images(groups_folders)
         self.features = self.get_features(dataset)
@@ -701,10 +741,12 @@ class pca:
             for cell_no, cell_image in enumerate(group):
                 self.targets.append(group_no)
 
+                print(group_no, cell_no)
+                
                 cell_features=[]
-                astrocyte = Cell(cell_image)
-                skeleton = Skeleton(cell_image)
-                sholl = Sholl(cell_image)
+                astrocyte = Cell(cell_image, self.image_type)
+                skeleton = Skeleton(cell_image, self.image_type)
+                sholl = Sholl(cell_image, self.image_type)
 
                 # cell_features.append(astrocyte.entropy())
                 # cell_features.append(skeleton.complexity())
@@ -785,6 +827,7 @@ class pca:
 
 
     def plot(self, color_dict, label, marker):
+        self.marker = marker
 
         def get_cov_ellipse(cov, centre, nstd, **kwargs):
             """
@@ -818,27 +861,30 @@ class pca:
         scaler.fit(self.features)
         X=scaler.transform(self.features) 
 
-        # print(self.features)
-        # print(X)
-
         # fit on data
         pca_object.fit(X)
+
         # access values and vectors
         self.feature_significance = pca_object.components_
 
-        # print(self.feature_significance)
-
+        # variance captured by principal components
         first_component_var = round(pca_object.explained_variance_ratio_[0], 2)*100
         second_component_var = round(pca_object.explained_variance_ratio_[1], 2)*100
 
         # transform data
         self.projected = pca_object.transform(X)
+
         first_component=self.projected[:,0]
         second_component=self.projected[:,1]
 
-        nstd = 1
+        # print(self.features)
+        # print(X)
+        # print(self.feature_significance)
+
+        # plot co
+
+        no_of_std = 3 # no. of standard deviations to show
         fig, ax = plt.subplots()
-        # ax.add_artist(ell)
         fig.patch.set_facecolor('white')
         for l in np.unique(self.targets):
             ix = np.where(self.targets==l)
@@ -848,7 +894,7 @@ class pca:
 
             ax.scatter(first_component[ix], second_component[ix], c=color_dict[l], s=40, label=label[l], marker=marker[l])
 
-            e = get_cov_ellipse(cov, (first_component_mean, second_component_mean), 3, fc=color_dict[l], alpha=0.4)
+            e = get_cov_ellipse(cov, (first_component_mean, second_component_mean), no_of_std, fc=color_dict[l], alpha=0.4)
             ax.add_artist(e)
 
 
@@ -874,14 +920,14 @@ class pca:
             ax[i].axes.get_xaxis().set_visible(False) # the x-axis co-ordinates are not so useful, as we just want to look how well separated the histograms are
             ax[i].set_yticks(())
             
-        ax[0].legend(['ko','control'], loc='best', fontsize=8)
+        ax[0].legend(self.marker, loc='best', fontsize=8)
         plt.tight_layout() # let's make good plots
         plt.show()
 
 
     def plot_feature_significance_heatmap(self):
 
-        sorted_significance_order = np.argsort(self.feature_significance[0])
+        sorted_significance_order = np.flip(np.argsort(abs(self.feature_significance[0])))
         sorted_feature_significance = np.zeros(self.feature_significance.shape)
         sorted_feature_significance[0] = np.array(self.feature_significance[0])[sorted_significance_order]
         sorted_feature_significance[1] = np.array(self.feature_significance[1])[sorted_significance_order]
