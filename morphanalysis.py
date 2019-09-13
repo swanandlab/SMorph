@@ -512,7 +512,7 @@ class Sholl:
         return concentric_coordinates, concentric_coordinates_intensities
 
 
-    def sholl_results(self, plot=False):
+    def sholl_results(self, plot=True):
         xs = []
         ys = []
         concentric_coordinates, concentric_intensities = self.concentric_coords_and_values()
@@ -691,9 +691,10 @@ class Sholl:
 
 class pca:
 
-    def __init__(self, groups_folders, image_type, save_features=True, save_sholl_results=True):
-        self.save_sholl_results = save_sholl_results
+    def __init__(self, groups_folders, image_type, label, save_features=True, show_sholl_plots=True, shell_step_size=3):
+        self.show_sholl_plots = show_sholl_plots
         self.image_type = image_type
+        self.label = label
 
         dataset = self.read_images(groups_folders)
         self.features = self.get_features(dataset)
@@ -706,8 +707,8 @@ class pca:
         if save_features==True:
             self.save_features()
 
-        if save_sholl_results==True:
-            self.save_sholl_plots()
+        if show_sholl_plots==True:
+            self.show_avg_sholl_plots(shell_step_size)
 
 
     def read_images(self, groups_folders):
@@ -730,15 +731,17 @@ class pca:
         dataset_features=[]
         self.targets=[]
 
-        if self.save_sholl_results==True:
+        if self.show_sholl_plots==True:
             self.sholl_original_plots=[]
             self.sholl_polynomial_plots=[]
             self.polynomial_models=[]
             
-
+        self.group_counts=[]
         for group_no, group in enumerate(dataset):
 
+            cell_count=0
             for cell_no, cell_image in enumerate(group):
+                cell_count+=1
                 self.targets.append(group_no)
 
                 print(group_no, cell_no)
@@ -775,13 +778,14 @@ class pca:
                 cell_features.append(sholl.sholl_regression_coefficient())
                 cell_features.append(sholl.regression_intercept())
 
-                if self.save_sholl_results==True:
+                if self.show_sholl_plots==True:
                     self.sholl_original_plots.append((sholl.distances_from_soma, sholl.no_of_intersections))
                     self.sholl_polynomial_plots.append((sholl.non_zero_distances_from_soma, sholl.non_zero_no_of_intersections))
                     self.polynomial_models.append(sholl.polynomial_model)
                 
                 dataset_features.append(cell_features)
 
+            self.group_counts.append(cell_count)
         return dataset_features
 
 
@@ -800,7 +804,7 @@ class pca:
                 save_to_file(self.file_names[cell_no], self.feature_names[feature_no], feature_val)
 
 
-    def save_sholl_plots(self):
+    def show_avg_sholl_plots(self, shell_step_size):
 
         original_plots_file = 'Original plots'
         polynomial_plots_file = 'Polynomial plots'
@@ -812,21 +816,74 @@ class pca:
 
         path = os.getcwd()+'/Sholl Results/'
 
+        largest_radius = []
+        no_of_intersections=[]
+
         with open(path+original_plots_file, 'w+') as text_file:
-            for plot in self.sholl_original_plots:
-                text_file.write("{} {} \n".format(plot[0], plot[1]))
+            for cell_no, plot in enumerate(self.sholl_original_plots):
+                text_file.write("{} {} {} \n".format(self.file_names[cell_no], plot[0], plot[1]))
+
+                # # get the max radius of each cell, as smallest and mid-level ones can be inferred from shell_step_size
+                # largest_radius.append(max(plot[0]))
+                # no_of_intersections.append(plot[1])
 
         with open(path+polynomial_plots_file, 'w+') as text_file:
-            for plot in self.sholl_polynomial_plots:
-                text_file.write("{} {} \n".format(plot[0], plot[1]))
+            for cell_no, plot in enumerate(self.sholl_polynomial_plots):
+                text_file.write("{} {} {} \n".format(self.file_names[cell_no], plot[0], plot[1]))
+
+                # get the max radius of each cell, as smallest and mid-level ones can be inferred from shell_step_size
+                largest_radius.append(max(plot[0]))
+                no_of_intersections.append(plot[1])
+
 
         with open(path+polynomial_models_file, 'wb') as pickle_file:
             for model in self.polynomial_models:
                 pickle.dump(model, pickle_file)
 
 
+        group_radiuses=[]
+        sholl_intersections=[]
+        for group_no, count in enumerate(self.group_counts):
+            group_count = sum(self.group_counts[:group_no+1])
+            group_radius = max(largest_radius[group_count-count:group_count])
+            group_radiuses.append(group_radius)
 
-    def plot(self, color_dict, label, marker):
+            current_intersections = no_of_intersections[group_count-count:group_count]
+            current_radiuses = range(shell_step_size, group_radius+1, shell_step_size)
+
+            intersection_dict = defaultdict(list)
+            for intersections in current_intersections:
+                for i, intersection_val in enumerate(intersections):
+                    intersection_dict[current_radiuses[i]].append(intersection_val) 
+
+            sholl_intersections.append(intersection_dict)
+
+        # print(sholl_intersections)
+
+        for group_no, group_sholl in enumerate(sholl_intersections):
+            x=[]
+            y=[]
+            e=[]
+            for radius, intersections in group_sholl.items():
+                x.append(radius)
+                intersections = (intersections + self.group_counts[group_no] * [0])[:self.group_counts[group_no]]
+                y.append(np.mean(intersections))
+                e.append(scipy.stats.sem(intersections))
+                print(radius, intersections)
+
+            print(x)
+            print(y)
+            plt.errorbar(x, y, yerr=e, label=self.label[group_no])
+
+
+        plt.xlabel("Distance from soma")
+        plt.ylabel("No. of intersections")
+        plt.legend()
+        plt.show()
+
+
+
+    def plot(self, color_dict, marker):
         self.marker = marker
 
         def get_cov_ellipse(cov, centre, nstd, **kwargs):
@@ -848,8 +905,7 @@ class pca:
             # Width and height of ellipse to draw
             width, height = nstd * np.sqrt(eigvals)
 
-            return Ellipse(xy=centre, width=width, height=height,
-                           angle=np.degrees(theta), **kwargs)
+            return Ellipse(xy=centre, width=width, height=height, angle=np.degrees(theta), **kwargs)
 
 
         pca_object = PCA(2)
@@ -892,7 +948,7 @@ class pca:
             second_component_mean = np.mean(second_component[ix])
             cov = np.cov(first_component, second_component)
 
-            ax.scatter(first_component[ix], second_component[ix], c=color_dict[l], s=40, label=label[l], marker=marker[l])
+            ax.scatter(first_component[ix], second_component[ix], c=color_dict[l], s=40, label=self.label[l], marker=marker[l])
 
             e = get_cov_ellipse(cov, (first_component_mean, second_component_mean), no_of_std, fc=color_dict[l], alpha=0.4)
             ax.add_artist(e)
@@ -906,7 +962,7 @@ class pca:
 
     def plot_feature_histograms(self):
 
-        fig, axes = plt.subplots(11, 2, figsize=(15, 11)) # 3 columns each containing 10 figures, total 30 features
+        fig, axes = plt.subplots(11, 2, figsize=(15, 11)) # 2 columns each containing 11 figures, total 22 features
         data = np.array(self.features)
         ko = data[np.where(np.array(self.targets) == 0)[0]] # define ko
         control = data[np.where(np.array(self.targets) == 1)[0]] # define control
