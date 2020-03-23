@@ -27,9 +27,6 @@ from sklearn.preprocessing import StandardScaler, RobustScaler, MaxAbsScaler
 from sklearn import linear_model
 from sklearn.decomposition import PCA
 
-import shearlexity
-from FFST import shearletTransformSpect
-
 
 
 
@@ -52,16 +49,7 @@ class Cell:
         self.threshold_image = self.threshold_image()
         self.inverted_threshold_image = skimage.util.invert(self.threshold_image)
         self.cleaned_image = self.remove_small_object_noise()
-
-
-    def entropy_complexity(self, plot=False):
-        h,c = shearlexity.map_cecp(self.gray_cell_image,3)
-        return np.sum(h), np.sum(c)
-
-
-    def complexity(self, plot=False):
-        h,c = shearlexity.map_cecp(self.gray_cell_image,3)
-        return np.sum(c)
+        self.cleaned_image_filled_holes = self.fill_holes()
 
 
     def get_blobs(self):
@@ -69,25 +57,45 @@ class Cell:
         if self.image_type == "DAB":
             blobs_log = blob_log(self.inverted_gray_cell_image, min_sigma=6, max_sigma=20, num_sigma=10, threshold=0.1, overlap=0.5)
         elif self.image_type == "confocal":
+            # print(self.cell_image.shape)
 
             blobs_log = blob_log(self.cell_image, min_sigma=3, max_sigma=20, num_sigma=10, threshold=0.1, overlap=0.5)
+
+            def eliminate_border_blobs(blobs_log):
+                # find the blobs too close to border so as to eliminate them
+                blobs_dict = defaultdict()
+                for i, blob in enumerate(blobs_log):
+                    blobs_dict[i] = np.take(blob, [0,1,3])
+                    y, x, r = blobs_dict[i]
+                    image_border_x, image_border_y = self.cell_image.shape[1]/5, self.cell_image.shape[0]/5
+                    if x < image_border_x or x > 4*image_border_x or y < image_border_y or y > 4*image_border_y:
+                        blobs_dict.pop(i)
+                blobs_log=[]
+                for key, blobs in blobs_dict.items():
+                    blobs_log.append(blobs)
+                return blobs_log
+
+            blobs_log = eliminate_border_blobs(blobs_log)
+
+            # print(blobs_log)
+
             if len(blobs_log)<1:
                 blobs_log = blob_log(self.cell_image, min_sigma=2, max_sigma=20, num_sigma=10, threshold=0.1, overlap=0.5)
+                blobs_log = eliminate_border_blobs(blobs_log)
 
-            # find the blobs too close to border so as to eliminate them
-            blobs_dict = defaultdict()
-            for i, blob in enumerate(blobs_log):
-                blobs_dict[i] = np.take(blob, [0,1,3])
-                y, x, r = blobs_dict[i]
-                image_border_x, image_border_y = self.cell_image.shape[1]/5, self.cell_image.shape[0]/5
-                if x < image_border_x or x > 4*image_border_x or y < image_border_y or y > 4*image_border_y:
-                    blobs_dict.pop(i)
 
-            blobs_log=[]
+            # fig, ax = plt.subplots(figsize=(4, 4))
+            # ax.imshow(self.cell_image, interpolation='nearest')
 
-            for key, blobs in blobs_dict.items():
-                blobs_log.append(blobs)
-
+            # for blob in blobs_log:
+            #     print(blob)
+            #     y, x, r = blob
+            #     c = plt.Circle((x, y), r, color='yellow', linewidth=2, fill=False)
+            #     ax.add_patch(c)
+                
+            # ax.set_axis_off()
+            # plt.tight_layout()
+            # plt.show()
 
         return blobs_log
 
@@ -110,7 +118,6 @@ class Cell:
             blob_intensities.append(blob_avg_est)
             blob_centres.append((y, x))
             blob_radiuses.append(r)
-
 
         if self.image_type == "DAB":
             max_intensity = blob_centres[np.argmin(blob_intensities)]
@@ -181,6 +188,10 @@ class Cell:
         return astrocyte_image
 
 
+    def fill_holes(self):
+        return scipy.ndimage.binary_fill_holes(self.cleaned_image).astype(int)
+
+
     def surface_area(self):
         return np.sum(self.cleaned_image)
 
@@ -190,7 +201,7 @@ class Skeleton:
 
         self.cell_image = cell_image
         self.astrocyte = Cell(cell_image, image_type)
-        self.cleaned_image = self.astrocyte.cleaned_image
+        self.cleaned_image = self.astrocyte.cleaned_image_filled_holes
         self.soma = self.astrocyte.get_soma()
         self.cell_skeleton = self.skeletonization()
         self.soma_on_skeleton = self.get_soma_on_skeleton()
@@ -226,14 +237,11 @@ class Skeleton:
         return soma_on_skeleton
 
 
-    def plot_skeleton_overlay(self):
-        fig, ax = plt.subplots()
-        draw.overlay_skeleton_2d(self.cell_image, self.cell_skeleton, dilate=0, axes=ax);
-
-
     def total_length(self):
         return np.sum(self.cell_skeleton)
 
+    def avg_process_thickness(self):
+        return round((self.astrocyte.surface_area()/self.total_length()), 1)
 
     def convex_hull(self, plot=False):
         convex_hull = skimage.morphology.convex_hull_image(self.cell_skeleton)
@@ -495,6 +503,8 @@ class Sholl:
         
     def concentric_coords_and_values(self):
 
+        from skimage.measure import label
+
         largest_radius = int(1.3*(np.max([self.soma_on_bounded_skeleton[1], abs(self.soma_on_bounded_skeleton[1]-self.bounded_skeleton.shape[1]), 
             self.soma_on_bounded_skeleton[0], abs(self.soma_on_bounded_skeleton[0]-self.bounded_skeleton.shape[0])])))
         
@@ -509,17 +519,35 @@ class Sholl:
                     concentric_coordinates[radius].append((x, y))
                     concentric_coordinates_intensities[radius].append(value)
 
-        return concentric_coordinates, concentric_coordinates_intensities
+
+        # array with intersection values corresponding to radii
+        no_of_intersections = defaultdict()
+        for radius, val in concentric_coordinates_intensities.items():
+            intersec_indicies=[]
+            indexes = [i for i, x in enumerate(val) if x]
+            for index in indexes:
+                intersec_indicies.append(concentric_coordinates[radius][index])
+
+            img = np.zeros(self.padded_skeleton.shape)
+            intersections = []
+            for i, j in enumerate(intersec_indicies):
+                img[j] = 1
+
+            label_image = label(img)
+            no_of_intersections[radius] = np.amax(label_image)
+        
+        print(no_of_intersections)
+
+        return concentric_coordinates, no_of_intersections
 
 
     def sholl_results(self, plot=True):
         xs = []
         ys = []
-        concentric_coordinates, concentric_intensities = self.concentric_coords_and_values()
-        for rad, val in concentric_intensities.items():
-            avg = sum(val)
+        concentric_coordinates, no_of_intersections = self.concentric_coords_and_values()
+        for rad, val in no_of_intersections.items():
             xs.append(rad)
-            ys.append(avg)
+            ys.append(val)
 
         order = np.argsort(xs)
         self.distances_from_soma = np.array(xs)[order]
@@ -698,11 +726,13 @@ class pca:
 
         dataset = self.read_images(groups_folders)
         self.features = self.get_features(dataset)
-        self.feature_names = ['surface_area', 'total_length', 'convex_hull', 'no_of_forks', 'no_of_primary_branches', 'no_of_secondary_branches', 
+        self.feature_names = ['surface_area', 'total_length', 'avg_process_thickness', 'convex_hull', 'no_of_forks', 'no_of_primary_branches', 'no_of_secondary_branches', 
                                 'no_of_tertiary_branches', 'no_of_quatenary_branches', 'no_of_terminal_branches', 'avg_length_of_primary_branches', 'avg_length_of_secondary_branches', 
                                 'avg_length_of_tertiary_branches', 'avg_length_of_quatenary_branches', 'avg_length_of_terminal_branches', 
                                 'critical_radius', 'critical_value', 'enclosing_radius', 'ramification_index', 'skewness', 'coefficient_of_determination', 
                                 'sholl_regression_coefficient', 'regression_intercept']
+
+        self.ttest()
 
         if save_features==True:
             self.save_features()
@@ -718,7 +748,6 @@ class pca:
             group_data=[]
             for file in os.listdir(group):
                 if not file.startswith('.'):
-                    print(group+'/'+file)
                     self.file_names.append((group+'/'+file))
                     image = io.imread(group+'/'+file)
                     group_data.append(image)
@@ -737,25 +766,30 @@ class pca:
             self.polynomial_models=[]
             
         self.group_counts=[]
+        cell_count=0
         for group_no, group in enumerate(dataset):
 
-            cell_count=0
+            group_cell_count=0
             for cell_no, cell_image in enumerate(group):
+
+                print(self.file_names[cell_count])
+
                 cell_count+=1
+                group_cell_count+=1
+
                 self.targets.append(group_no)
 
-                print(group_no, cell_no)
-                
                 cell_features=[]
                 astrocyte = Cell(cell_image, self.image_type)
                 skeleton = Skeleton(cell_image, self.image_type)
                 sholl = Sholl(cell_image, self.image_type)
 
-                # cell_features.append(astrocyte.entropy())
-                # cell_features.append(skeleton.complexity())
+                # cell_features.append(astrocyte.entropy_complexity()[0])
+                # cell_features.append(astrocyte.entropy_complexity()[1])
 
                 cell_features.append(astrocyte.surface_area())
                 cell_features.append(skeleton.total_length())
+                cell_features.append(skeleton.avg_process_thickness())
                 cell_features.append(skeleton.convex_hull())
                 cell_features.append(skeleton.get_no_of_forks())
                 cell_features.append(skeleton.get_primary_branches()[1])
@@ -785,7 +819,7 @@ class pca:
                 
                 dataset_features.append(cell_features)
 
-            self.group_counts.append(cell_count)
+            self.group_counts.append(group_cell_count)
         return dataset_features
 
 
@@ -804,11 +838,29 @@ class pca:
                 save_to_file(self.file_names[cell_no], self.feature_names[feature_no], feature_val)
 
 
+    def ttest(self):
+
+        # print(self.features)
+        feature_matrix_1 = np.array(self.features[:self.group_counts[0]])
+        feature_matrix_2 = np.array(self.features[self.group_counts[0]:])
+        for no, name in enumerate(self.feature_names):
+            current_feature_vector_1 = feature_matrix_1[:, no]
+            current_feature_vector_2 = feature_matrix_2[:, no]
+            # print(name)
+            # print("Saline")
+            # print(current_feature_vector_1)
+            # print("Mean: ", np.mean(current_feature_vector_1))
+            # print("SE: ", scipy.stats.sem(current_feature_vector_1))
+            # print("Desipramine")
+            # print(current_feature_vector_2)
+            # print("Mean: ", np.mean(current_feature_vector_2))
+            # print("SE: ", scipy.stats.sem(current_feature_vector_2))
+            # print("p-value: ", scipy.stats.ttest_ind(current_feature_vector_1, current_feature_vector_2)[1])
+
     def show_avg_sholl_plots(self, shell_step_size):
 
         original_plots_file = 'Original plots'
         polynomial_plots_file = 'Polynomial plots'
-        polynomial_models_file = 'Polynomial models'
 
         directory = os.getcwd()+'/Sholl Results'
         if not os.path.exists(directory):
@@ -836,11 +888,6 @@ class pca:
                 no_of_intersections.append(plot[1])
 
 
-        with open(path+polynomial_models_file, 'wb') as pickle_file:
-            for model in self.polynomial_models:
-                pickle.dump(model, pickle_file)
-
-
         group_radiuses=[]
         sholl_intersections=[]
         for group_no, count in enumerate(self.group_counts):
@@ -858,7 +905,12 @@ class pca:
 
             sholl_intersections.append(intersection_dict)
 
-        # print(sholl_intersections)
+        with open(path+"Sholl values", 'w') as text_file:
+            for group_no, group_sholl in enumerate(sholl_intersections):
+                text_file.write("Group: {}\n".format(group_no))
+                for radius, intersections in group_sholl.items():
+                    text_file.write("{} {}\n".format(radius, intersections))
+
 
         for group_no, group_sholl in enumerate(sholl_intersections):
             x=[]
@@ -869,10 +921,7 @@ class pca:
                 intersections = (intersections + self.group_counts[group_no] * [0])[:self.group_counts[group_no]]
                 y.append(np.mean(intersections))
                 e.append(scipy.stats.sem(intersections))
-                print(radius, intersections)
-
-            print(x)
-            print(y)
+                
             plt.errorbar(x, y, yerr=e, label=self.label[group_no])
 
 
@@ -884,6 +933,9 @@ class pca:
 
 
     def plot(self, color_dict, marker):
+
+        from sklearn.cluster import KMeans
+
         self.marker = marker
 
         def get_cov_ellipse(cov, centre, nstd, **kwargs):
@@ -915,7 +967,7 @@ class pca:
         # scaler = RobustScaler()
         scaler = MaxAbsScaler()
         scaler.fit(self.features)
-        X=scaler.transform(self.features) 
+        X=scaler.transform(self.features)
 
         # fit on data
         pca_object.fit(X)
@@ -933,17 +985,25 @@ class pca:
         first_component=self.projected[:,0]
         second_component=self.projected[:,1]
 
-        # print(self.features)
+        with open("pca values", 'w') as text_file:
+            text_file.write("First component:\n{}\nSecond component:\n{}".format(first_component, second_component))
+
+
+        # print(first_component, second_component)
+        # print(scipy.stats.ttest_ind(first_component, second_component))
         # print(X)
         # print(self.feature_significance)
 
-        # plot co
+        y_pred = KMeans(n_clusters=2).fit_predict(X)
+        
+
 
         no_of_std = 3 # no. of standard deviations to show
         fig, ax = plt.subplots()
         fig.patch.set_facecolor('white')
         for l in np.unique(self.targets):
-            ix = np.where(self.targets==l)
+            # ix = np.where(self.targets==l)
+            ix = np.where(y_pred==l)
             first_component_mean = np.mean(first_component[ix])
             second_component_mean = np.mean(second_component[ix])
             cov = np.cov(first_component, second_component)
@@ -962,7 +1022,7 @@ class pca:
 
     def plot_feature_histograms(self):
 
-        fig, axes = plt.subplots(11, 2, figsize=(15, 11)) # 2 columns each containing 11 figures, total 22 features
+        fig, axes = plt.subplots(12, 2, figsize=(15, 12)) # 2 columns each containing 13 figures, total 22 features
         data = np.array(self.features)
         ko = data[np.where(np.array(self.targets) == 0)[0]] # define ko
         control = data[np.where(np.array(self.targets) == 1)[0]] # define control
