@@ -23,7 +23,7 @@ from skan import draw
 from skan import skeleton_to_csgraph
 
 from sklearn import preprocessing
-from sklearn.preprocessing import StandardScaler, RobustScaler, MaxAbsScaler
+from sklearn.preprocessing import MaxAbsScaler
 from sklearn import linear_model
 from sklearn.decomposition import PCA
 
@@ -255,7 +255,9 @@ class Skeleton:
 
     def get_no_of_forks(self, plot=False):
 
+        # get the degree for every cell pixel (no. of neighbouring pixels) 
         pixel_graph, coordinates, degrees = skeleton_to_csgraph(self.cell_skeleton)
+        # array of all pixel locations with degree more than 2
         fork_image = np.where(degrees > [2], 1, 0)
         s = scipy.ndimage.generate_binary_structure(2,2)
         labeled_array, num_forks = scipy.ndimage.label(fork_image, structure=s)
@@ -487,7 +489,7 @@ class Skeleton:
 
 
 class Sholl:
-    def __init__(self, cell_image, image_type, shell_step_size = 5, polynomial_degree=3):
+    def __init__(self, cell_image, image_type, shell_step_size = 3, polynomial_degree=3):
 
         self.shell_step_size = shell_step_size
         self.polynomial_degree = polynomial_degree
@@ -535,13 +537,11 @@ class Sholl:
 
             label_image = label(img)
             no_of_intersections[radius] = np.amax(label_image)
-        
-        print(no_of_intersections)
 
         return concentric_coordinates, no_of_intersections
 
 
-    def sholl_results(self, plot=True):
+    def sholl_results(self, plot=False):
         xs = []
         ys = []
         concentric_coordinates, no_of_intersections = self.concentric_coords_and_values()
@@ -614,9 +614,11 @@ class Sholl:
         return self.polynomial_model
 
     def enclosing_radius(self):
+        # index of last non-zero value in the array containing radii
         return self.non_zero_distances_from_soma[len(self.non_zero_no_of_intersections) - (self.non_zero_no_of_intersections!=0)[::-1].argmax() - 1]
     
     def critical_radius(self):
+        # radii_array[index of the max value in the array for no_of_intersections (polynomial plot)]
         return self.non_zero_distances_from_soma[np.argmax(self.polynomial_predicted_no_of_intersections)]
     
     def critical_value(self):
@@ -732,7 +734,7 @@ class pca:
                                 'critical_radius', 'critical_value', 'enclosing_radius', 'ramification_index', 'skewness', 'coefficient_of_determination', 
                                 'sholl_regression_coefficient', 'regression_intercept']
 
-        self.ttest()
+        # self.ttest()
 
         if save_features==True:
             self.save_features()
@@ -846,16 +848,16 @@ class pca:
         for no, name in enumerate(self.feature_names):
             current_feature_vector_1 = feature_matrix_1[:, no]
             current_feature_vector_2 = feature_matrix_2[:, no]
-            # print(name)
-            # print("Saline")
-            # print(current_feature_vector_1)
-            # print("Mean: ", np.mean(current_feature_vector_1))
-            # print("SE: ", scipy.stats.sem(current_feature_vector_1))
-            # print("Desipramine")
-            # print(current_feature_vector_2)
-            # print("Mean: ", np.mean(current_feature_vector_2))
-            # print("SE: ", scipy.stats.sem(current_feature_vector_2))
-            # print("p-value: ", scipy.stats.ttest_ind(current_feature_vector_1, current_feature_vector_2)[1])
+            print(name)
+            print("Saline")
+            print(current_feature_vector_1)
+            print("Mean: ", np.mean(current_feature_vector_1))
+            print("SE: ", scipy.stats.sem(current_feature_vector_1))
+            print("Desipramine")
+            print(current_feature_vector_2)
+            print("Mean: ", np.mean(current_feature_vector_2))
+            print("SE: ", scipy.stats.sem(current_feature_vector_2))
+            print("p-value: ", scipy.stats.ttest_ind(current_feature_vector_1, current_feature_vector_2)[1])
 
     def show_avg_sholl_plots(self, shell_step_size):
 
@@ -963,8 +965,6 @@ class pca:
         pca_object = PCA(2)
 
         # Scale data
-        # scaler = StandardScaler()
-        # scaler = RobustScaler()
         scaler = MaxAbsScaler()
         scaler.fit(self.features)
         X=scaler.transform(self.features)
@@ -976,8 +976,8 @@ class pca:
         self.feature_significance = pca_object.components_
 
         # variance captured by principal components
-        first_component_var = round(pca_object.explained_variance_ratio_[0], 2)*100
-        second_component_var = round(pca_object.explained_variance_ratio_[1], 2)*100
+        first_component_var = pca_object.explained_variance_ratio_[0]
+        second_component_var = pca_object.explained_variance_ratio_[1]
 
         # transform data
         self.projected = pca_object.transform(X)
@@ -989,21 +989,11 @@ class pca:
             text_file.write("First component:\n{}\nSecond component:\n{}".format(first_component, second_component))
 
 
-        # print(first_component, second_component)
-        # print(scipy.stats.ttest_ind(first_component, second_component))
-        # print(X)
-        # print(self.feature_significance)
-
-        y_pred = KMeans(n_clusters=2).fit_predict(X)
-        
-
-
         no_of_std = 3 # no. of standard deviations to show
         fig, ax = plt.subplots()
         fig.patch.set_facecolor('white')
         for l in np.unique(self.targets):
-            # ix = np.where(self.targets==l)
-            ix = np.where(y_pred==l)
+            ix = np.where(self.targets==l)
             first_component_mean = np.mean(first_component[ix])
             second_component_mean = np.mean(second_component[ix])
             cov = np.cov(first_component, second_component)
@@ -1014,8 +1004,8 @@ class pca:
             ax.add_artist(e)
 
 
-        plt.xlabel("PC 1 (Variance: "+str(first_component_var)+"%)",fontsize=14)
-        plt.ylabel("PC 2 (Variance: "+str(second_component_var)+"%)",fontsize=14)
+        plt.xlabel("PC 1 (Variance: %.1f%%)" % (first_component_var*100), fontsize=14)
+        plt.ylabel("PC 2 (Variance: %.1f%%)" % (second_component_var*100), fontsize=14)
         plt.legend()
         plt.show()
 
@@ -1049,7 +1039,7 @@ class pca:
         sorted_feature_significance[1] = np.array(self.feature_significance[1])[sorted_significance_order]
         sorted_feature_names = np.array(self.feature_names)[sorted_significance_order]
 
-        plt.matshow(np.array(sorted_feature_significance), cmap='viridis')
+        plt.matshow(np.array(sorted_feature_significance), cmap='gist_heat')
         plt.yticks([0,1], ['1st Comp','2nd Comp'], fontsize=10)
         plt.colorbar()
         plt.xticks(range(len(sorted_feature_names)), sorted_feature_names, rotation=65, ha='left')
