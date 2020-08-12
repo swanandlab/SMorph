@@ -14,11 +14,13 @@ Install the dependencies by typing following in the command line:
 pip install -r requirements.txt
 `
 
-Download the Morphometric-analysis repository using following commands:
+If you have a GitHub account, you can clone (or fork) the repository by running:
 
 `
-git clone morphometric-analysis
+git clone https://github.com/parulsethi/Morphometric-analysis.git
 `
+
+If you are not familiar with git or don’t have a GitHub account, you can download the repository as a zip file by going to the GitHub repository (https://github.com/parulsethi/Morphometric-analysis/) in the browser and click the “Download” button on the upper right corner.
 
 This will store the repository on your local computer and you can then place your own data folders inside the Morphometric analysis folder and implement analysis by replacing the input data folder names.
 
