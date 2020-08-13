@@ -11,15 +11,19 @@ The code has been tested for python 3.7, if you don't have it installed, please 
 
 Install the dependencies by typing following in the command line:
 
-`
+```
+
 pip install -r requirements.txt
-`
+
+```
 
 If you have a GitHub account, you can clone (or fork) the repository by running:
 
-`
+```
+
 git clone https://github.com/parulsethi/Morphometric-analysis.git
-`
+
+```
 
 If you are not familiar with git or don’t have a GitHub account, you can download the repository as a zip file by going to the GitHub repository (https://github.com/parulsethi/Morphometric-analysis/) in the browser and click the “Download” button on the upper right corner.
 
@@ -29,9 +33,9 @@ To run the notebooks, execute `jupyter notebook` from command line and locate to
 
 If the above commands throw errors on windows, please try:
 
-`
+```
+
 python -m pip install -r requirements.txt
-`
-`
 python -m notebook
-`
+
+```
