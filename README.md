@@ -31,6 +31,7 @@ If the above commands throw errors on windows, please try:
 
 `
 python -m pip install -r requirements.txt
-
+`
+`
 python -m notebook
 `
