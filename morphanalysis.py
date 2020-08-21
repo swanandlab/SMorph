@@ -12,35 +12,39 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 
 import skimage.io as io
-from skimage.color import rgb2gray
+# from skimage.color import rgb2gray
 from skimage.transform import rescale
-from skimage.feature import blob_dog, blob_log, blob_doh
+from skimage.feature import blob_log
 from skimage.morphology import closing, square
 from skimage.filters import threshold_otsu
+from skimage.measure import label
 
 import skan
-from skan import draw
 from skan import skeleton_to_csgraph
 
 from sklearn import preprocessing
-from sklearn.preprocessing import MaxAbsScaler
 from sklearn import linear_model
-from sklearn.decomposition import PCA
+from sklearn import decomposition
+from sklearn.cluster import KMeans
 
 
-
-
-def distance(P1, P2):
-    """
-    computing the distance between 2 points
-    """
-    return ((P1[0] - P2[0])**2 + (P1[1] - P2[1])**2) ** 0.5
-
+# write class definitions in comments
 
 
 class Cell:
+    """
+    """
 
     def __init__(self, cell_image, image_type, reference_image=None):
+        """
+        Args:
+
+        cell_image: RGB cell image
+        image_type: 'confocal' or 'DAB'
+        reference_image
+
+        """
+
         self.cell_image = cell_image
         self.image_type = image_type
         self.gray_cell_image = skimage.color.rgb2gray(self.cell_image)
@@ -53,12 +57,11 @@ class Cell:
 
 
     def get_blobs(self):
+        # Extracts circular blobs in cell image for finding soma later
 
         if self.image_type == "DAB":
             blobs_log = blob_log(self.inverted_gray_cell_image, min_sigma=6, max_sigma=20, num_sigma=10, threshold=0.1, overlap=0.5)
         elif self.image_type == "confocal":
-            # print(self.cell_image.shape)
-
             blobs_log = blob_log(self.cell_image, min_sigma=3, max_sigma=20, num_sigma=10, threshold=0.1, overlap=0.5)
 
             def eliminate_border_blobs(blobs_log):
@@ -77,36 +80,25 @@ class Cell:
 
             blobs_log = eliminate_border_blobs(blobs_log)
 
-            # print(blobs_log)
-
             if len(blobs_log)<1:
+                # if none of the blobs remain after border blob elimination, try blob_log with less stringent parameters 
                 blobs_log = blob_log(self.cell_image, min_sigma=2, max_sigma=20, num_sigma=10, threshold=0.1, overlap=0.5)
                 blobs_log = eliminate_border_blobs(blobs_log)
 
-
-            # fig, ax = plt.subplots(figsize=(4, 4))
-            # ax.imshow(self.cell_image, interpolation='nearest')
-
-            # for blob in blobs_log:
-            #     print(blob)
-            #     y, x, r = blob
-            #     c = plt.Circle((x, y), r, color='yellow', linewidth=2, fill=False)
-            #     ax.add_patch(c)
-                
-            # ax.set_axis_off()
-            # plt.tight_layout()
-            # plt.show()
 
         return blobs_log
 
 
     def centre_of_mass(self, blobs):
+        # finds centre of mass of the multiple blobs detected
+
         # find the blob with highest intensity value
         ixs = np.indices(self.gray_cell_image.shape)
 
         blob_intensities=[]
         blob_centres=[]
         blob_radiuses=[]
+
         for blob in blobs:
             y, x, r = blob
             # Define an array of shape `[2, 1, 1]`, containing the center of the blob
@@ -121,11 +113,12 @@ class Cell:
 
         if self.image_type == "DAB":
             max_intensity = blob_centres[np.argmin(blob_intensities)]
+
             return max_intensity
+
         elif self.image_type == "confocal":
             max_radius = blob_centres[np.argmax(blob_radiuses)]
             max_intensity = blob_centres[np.argmax(blob_intensities)]
-
             if len(blob_radiuses) > len(set(blob_radiuses)):
                 return max_intensity
             else:
@@ -133,13 +126,9 @@ class Cell:
 
 
     def get_soma(self):
+        # calculate pixel position to be attribute as soma
 
         soma_blobs = self.get_blobs()
-
-        # if len(soma_blobs) == 0:
-        #     fig, ax = plt.subplots()
-        #     ax.set_axis_off()
-        #     ax.imshow(self.cell_image)
 
         if len(soma_blobs)==1:
             soma = soma_blobs[0][:2]
@@ -149,7 +138,6 @@ class Cell:
         return soma
 
     def threshold_image(self):
-
         if self.reference_image is not None:
             self.gray_reference_image = skimage.color.rgb2gray(self.reference_image)
             self.gray_cell_image = skimage.transform.match_histograms(self.gray_cell_image, self.gray_reference_image)
@@ -167,7 +155,6 @@ class Cell:
 
 
     def label_objects(self):
-
         bw = closing(self.inverted_threshold_image, square(1))
         # label image regions
         labelled_image, no_of_objects = skimage.measure.label(bw, return_num=True)
@@ -196,8 +183,19 @@ class Cell:
         return np.sum(self.cleaned_image)
 
 
+
 class Skeleton:
+    """
+    """
+
     def __init__(self, cell_image, image_type):
+        """
+        Args:
+
+        cell_image: RGB cell image
+        image_type: 'confocal' or 'DAB'
+
+        """
 
         self.cell_image = cell_image
         self.astrocyte = Cell(cell_image, image_type)
@@ -209,6 +207,11 @@ class Skeleton:
         self.classify_branching_structure()
 
 
+    def distance(self, P1, P2):
+        # find eucledian distance between two pixel positions
+        return ((P1[0] - P2[0])**2 + (P1[1] - P2[1])**2) ** 0.5
+
+
     def skeletonization(self):
         # perform skeletonization
         return skimage.morphology.skeletonize(self.cleaned_image) 
@@ -216,14 +219,18 @@ class Skeleton:
 
     def pad_skeleton(self):
 
+        # get all the pixel indices representing skeleton
         skeleton_indices = np.nonzero(self.cell_skeleton)
+
+        # get corner points enclosing skeleton
         x_min, x_max = min(skeleton_indices[1]), max(skeleton_indices[1])
         y_min, y_max = min(skeleton_indices[0]), max(skeleton_indices[0])
         self.bounded_skeleton = self.cell_skeleton[y_min:y_max, x_min:x_max]
-        pad_width = max(self.bounded_skeleton.shape)//2
 
+        pad_width = max(self.bounded_skeleton.shape)//2
         self.bounded_skeleton_boundary = [x_min, x_max, y_min, y_max]
 
+        # get updated soma position on bounded and padded skeleton
         self.soma_on_bounded_skeleton = self.soma_on_skeleton[0]-y_min, self.soma_on_skeleton[1]-x_min
         self.soma_on_padded_skeleton = self.soma_on_skeleton[0]-y_min+pad_width, self.soma_on_skeleton[1]-x_min+pad_width
 
@@ -232,7 +239,7 @@ class Skeleton:
 
     def get_soma_on_skeleton(self):
         skeleton_pixel_coordinates = [(i, j) for (i, j), val in np.ndenumerate(self.cell_skeleton) if val!=0]
-        soma_on_skeleton = min(skeleton_pixel_coordinates, key=lambda x: distance(self.soma, x))
+        soma_on_skeleton = min(skeleton_pixel_coordinates, key=lambda x: self.distance(self.soma, x))
 
         return soma_on_skeleton
 
@@ -240,8 +247,10 @@ class Skeleton:
     def total_length(self):
         return np.sum(self.cell_skeleton)
 
+
     def avg_process_thickness(self):
         return round((self.astrocyte.surface_area()/self.total_length()), 1)
+
 
     def convex_hull(self, plot=False):
         convex_hull = skimage.morphology.convex_hull_image(self.cell_skeleton)
@@ -289,7 +298,6 @@ class Skeleton:
         seen = set()
         # eliminate loops from branch statistics
         for branch_no, branch in enumerate(branch_statistics):
-            
             # If element not in seen, add it to both
             current = (branch[0], branch[1])
             if current not in seen:
@@ -357,14 +365,13 @@ class Skeleton:
     def classify_branching_structure(self, plot=False):
 
         def get_soma_node():
-
             near = []
             for i in range(skan.csr.Skeleton(self.cell_skeleton).n_paths):
                 path_coords = skan.csr.Skeleton(self.cell_skeleton).path_coordinates(i)
-                nearest = min(path_coords, key=lambda x: distance(self.soma_on_skeleton, x))
+                nearest = min(path_coords, key=lambda x: self.distance(self.soma_on_skeleton, x))
                 near.append(nearest)
 
-            soma_on_path = min(near, key=lambda x: distance(self.soma_on_skeleton, x))
+            soma_on_path = min(near, key=lambda x: self.distance(self.soma_on_skeleton, x))
 
             for i,j in enumerate(skan.csr.Skeleton(self.cell_skeleton).coordinates):
                 if all(soma_on_path==j):
@@ -450,7 +457,9 @@ class Skeleton:
         primary_branches = self.branching_structure_array[0]
         no_of_primary_branches = len(primary_branches)
         avg_length_of_primary_branches = 0 if no_of_primary_branches == 0 else sum(map(len, primary_branches))/float(len(primary_branches))
+        
         return primary_branches, no_of_primary_branches, round(avg_length_of_primary_branches, 1)
+
 
     def get_secondary_branches(self):
         try:
@@ -459,7 +468,9 @@ class Skeleton:
             secondary_branches=[]
         no_of_secondary_branches = len(secondary_branches)
         avg_length_of_secondary_branches = 0 if no_of_secondary_branches == 0 else sum(map(len, secondary_branches))/float(len(secondary_branches))
+        
         return secondary_branches, no_of_secondary_branches, round(avg_length_of_secondary_branches, 1)
+
 
     def get_tertiary_branches(self):
         try:
@@ -468,7 +479,9 @@ class Skeleton:
             tertiary_branches=[]
         no_of_tertiary_branches = len(tertiary_branches)
         avg_length_of_tertiary_branches = 0 if no_of_tertiary_branches == 0 else sum(map(len, tertiary_branches))/float(len(tertiary_branches))
+        
         return tertiary_branches, no_of_tertiary_branches, round(avg_length_of_tertiary_branches, 1)
+
 
     def get_quatenary_branches(self):
         try:
@@ -478,38 +491,54 @@ class Skeleton:
         quatenary_branches = [branch for branch_level in quatenary_branches for branch in branch_level]
         no_of_quatenary_branches = len(quatenary_branches)
         avg_length_of_quatenary_branches = 0 if no_of_quatenary_branches == 0 else sum(map(len, quatenary_branches))/float(len(quatenary_branches))
+        
         return quatenary_branches, no_of_quatenary_branches, round(avg_length_of_quatenary_branches, 1)
+
 
     def get_terminal_branches(self):
         terminal_branches = self.terminal_branches
         no_of_terminal_branches = len(terminal_branches)
         avg_length_of_terminal_branches = 0 if no_of_terminal_branches == 0 else sum(map(len, terminal_branches))/float(len(terminal_branches))
+        
         return terminal_branches, no_of_terminal_branches, round(avg_length_of_terminal_branches, 1)
 
 
 
 class Sholl:
-    def __init__(self, cell_image, image_type, shell_step_size = 3, polynomial_degree=3):
+    """
+    """
+
+    def __init__(self, cell_image, image_type, shell_step_size, polynomial_degree=3):
+
+        """
+        Args:
+        
+        cell_image: RGB cell image
+        image_type: 'confocal' or 'DAB'
+        shell_step_size: pixel difference between concentric circles for sholl analysis
+        polynomial_degree (scalar): degree of polynomial for fitting regression model on sholl values
+
+        """
 
         self.shell_step_size = shell_step_size
         self.polynomial_degree = polynomial_degree
-
         self.skeleton = Skeleton(cell_image, image_type)
         self.bounded_skeleton = self.skeleton.bounded_skeleton
         self.soma_on_bounded_skeleton = self.skeleton.soma_on_bounded_skeleton
         self.padded_skeleton = self.skeleton.padded_skeleton
         self.soma_on_padded_skeleton = self.skeleton.soma_on_padded_skeleton
-        self.sholl_results()
+        self.distances_from_soma = self.sholl_results()[0]
+        self.no_of_intersections = self.sholl_results()[1]
         self.polynomial_model = self.polynomial_fit()
+        self.determination_ratio()
 
         
     def concentric_coords_and_values(self):
-
-        from skimage.measure import label
+        # concentric_coordinates: {radius values: [pixel coordinates on that radius]}
+        # no_of_intersections: {radius values: no_of_intersection values}
 
         largest_radius = int(1.3*(np.max([self.soma_on_bounded_skeleton[1], abs(self.soma_on_bounded_skeleton[1]-self.bounded_skeleton.shape[1]), 
             self.soma_on_bounded_skeleton[0], abs(self.soma_on_bounded_skeleton[0]-self.bounded_skeleton.shape[0])])))
-        
         concentric_coordinates = defaultdict(list) # {100: [(10,10), ..] , 400: [(20,20), ..]}
         concentric_coordinates_intensities = defaultdict(list)
         concentric_radiuses = [radius for radius in range(self.shell_step_size, largest_radius, self.shell_step_size)]
@@ -521,7 +550,6 @@ class Sholl:
                     concentric_coordinates[radius].append((x, y))
                     concentric_coordinates_intensities[radius].append(value)
 
-
         # array with intersection values corresponding to radii
         no_of_intersections = defaultdict()
         for radius, val in concentric_coordinates_intensities.items():
@@ -529,12 +557,10 @@ class Sholl:
             indexes = [i for i, x in enumerate(val) if x]
             for index in indexes:
                 intersec_indicies.append(concentric_coordinates[radius][index])
-
             img = np.zeros(self.padded_skeleton.shape)
             intersections = []
             for i, j in enumerate(intersec_indicies):
                 img[j] = 1
-
             label_image = label(img)
             no_of_intersections[radius] = np.amax(label_image)
 
@@ -542,17 +568,14 @@ class Sholl:
 
 
     def sholl_results(self, plot=False):
-        xs = []
-        ys = []
+        # return sholl radiuses and corresponding intersection values
+        xs, ys = [], []
         concentric_coordinates, no_of_intersections = self.concentric_coords_and_values()
         for rad, val in no_of_intersections.items():
             xs.append(rad)
             ys.append(val)
-
         order = np.argsort(xs)
-        self.distances_from_soma = np.array(xs)[order]
-        self.no_of_intersections = np.array(ys)[order]
-        
+
         if plot==True:
             astrocyte_skeleton_copy = copy.deepcopy(self.padded_skeleton)
             for radius, coordinates in concentric_coordinates.items():
@@ -560,26 +583,28 @@ class Sholl:
                     cell_image_with_circles = astrocyte_skeleton_copy
                     cell_image_with_circles[coord[0],coord[1]]=1
 
-
+            # plot circles on skeleton
             fig, ax = plt.subplots(figsize=(10, 6))
             ax.imshow(cell_image_with_circles)
-
+            # overlay soma on skeleton
             y, x = self.soma_on_padded_skeleton
             c = plt.Circle((x, y), 1, color='red')
             ax.add_patch(c)
-
             ax.set_axis_off()
             plt.tight_layout()
             plt.show()
 
+            # plot sholl graph showing radius vs. no_of_intersections 
             plt.plot(self.distances_from_soma, self.no_of_intersections)
             plt.xlabel("Distance from centre")
             plt.ylabel("No. of intersections") 
             plt.show()
 
+        return np.array(xs)[order], np.array(ys)[order]
+
 
     def polynomial_fit(self, plot=False):
-        # Linear
+        # Linear polynomial regression to describe the relationship between intersections vs. distance
 
         # till last non-zero value
         last_intersection_index = np.max(np.nonzero(self.no_of_intersections))
@@ -591,49 +616,56 @@ class Sholl:
 
         x_ = preprocessing.PolynomialFeatures(degree=self.polynomial_degree, include_bias=False).fit_transform(reshaped_x)
         # create a linear regression model
-        self.polynomial_model = linear_model.LinearRegression().fit(x_, y_data)
+        polynomial_model = linear_model.LinearRegression().fit(x_, y_data)
 
-        self.polynomial_predicted_no_of_intersections = self.polynomial_model.predict(x_)
+        self.polynomial_predicted_no_of_intersections = polynomial_model.predict(x_)
 
         if plot==True:
             # predict y from the data
             x_new = self.non_zero_distances_from_soma
-            y_new = self.polynomial_model.predict(x_)
-
+            y_new = polynomial_model.predict(x_)
             # plot the results
             plt.figure(figsize=(4, 3))
             ax = plt.axes()
             ax.scatter(reshaped_x, y_data)
             ax.plot(x_new, y_new)
-
             ax.set_xlabel('x')
             ax.set_ylabel('y')
             ax.axis('tight')
             plt.show()
 
-        return self.polynomial_model
+        return polynomial_model
+
 
     def enclosing_radius(self):
         # index of last non-zero value in the array containing radii
         return self.non_zero_distances_from_soma[len(self.non_zero_no_of_intersections) - (self.non_zero_no_of_intersections!=0)[::-1].argmax() - 1]
     
+
     def critical_radius(self):
         # radii_array[index of the max value in the array for no_of_intersections (polynomial plot)]
         return self.non_zero_distances_from_soma[np.argmax(self.polynomial_predicted_no_of_intersections)]
     
+
     def critical_value(self):
+        # local maximum of the polynomial fit (Maximum no. of intersections)
         return round(np.max(self.polynomial_predicted_no_of_intersections), 2)
     
+
     def skewness(self):
+        # indication of how symmetrical the polynomial distribution is around its mean 
         x_ = preprocessing.PolynomialFeatures(degree=3, include_bias=False).fit_transform(self.non_zero_no_of_intersections.reshape((-1, 1)))
         return round(scipy.stats.skew(self.polynomial_model.predict(x_)), 2)
     
+
     def schoenen_ramification_index(self):
+        # ratio between critical value and number of primary branches
         no_of_primary_branches = self.skeleton.get_primary_branches()[1]
         schoenen_ramification_index = self.critical_value()/no_of_primary_branches
         return round(schoenen_ramification_index, 2)
     
-    def semi_log(self, plot=False):
+
+    def semi_log(self):
         # no. of intersections/circumference
         normalized_y = np.log(self.non_zero_no_of_intersections/(2*math.pi*self.non_zero_distances_from_soma))
         reshaped_x = self.non_zero_distances_from_soma.reshape((-1, 1))
@@ -642,25 +674,14 @@ class Sholl:
         # predict y from the data
         x_new = self.non_zero_distances_from_soma
         y_new = model.predict(reshaped_x)
+        r2 = model.score(reshaped_x, normalized_y)
+        regression_intercept = model.intercept_
+        regression_coefficient = -model.coef_[0]
 
-        if plot==True:
-            # plot the results
-            plt.figure(figsize=(4, 3))
-            ax = plt.axes()
-            ax.scatter(reshaped_x, normalized_y)
-            ax.plot(x_new, y_new)
-
-            ax.set_xlabel('x')
-            ax.set_ylabel('y')
-            ax.axis('tight')
-            plt.show()
-
-        self.semi_log_r2 = model.score(reshaped_x, normalized_y)
-        self.semi_log_regression_intercept = model.intercept_
-        self.semi_log_sholl_regression_coefficient = -model.coef_[0]
+        return r2, regression_intercept, regression_coefficient
     
-    def log_log(self, plot=False):
-    
+
+    def log_log(self):
         # no. of intersections/circumference
         normalized_y = np.log(self.non_zero_no_of_intersections/(2*math.pi*self.non_zero_distances_from_soma))
         reshaped_x = self.non_zero_distances_from_soma.reshape((-1, 1))
@@ -670,61 +691,70 @@ class Sholl:
         # predict y from the data
         x_new = normalized_x
         y_new = model.predict(normalized_x)
+        r2 = model.score(normalized_x, normalized_y)
+        regression_intercept = model.intercept_
+        regression_coefficient = -model.coef_[0]
 
-        if plot==True:
+        return r2, regression_intercept, regression_coefficient
+  
 
-            # plot the results
-            plt.figure(figsize=(4, 3))
-            ax = plt.axes()
-            ax.scatter(normalized_x, normalized_y)
-            ax.plot(x_new, y_new)
-
-            ax.set_xlabel('x')
-            ax.set_ylabel('y')
-            ax.axis('tight')
-            plt.show()
-
-        self.log_log_r2 = model.score(normalized_x, normalized_y)
-        self.log_log_regression_intercept = model.intercept_
-        self.log_log_sholl_regression_coefficient = -model.coef_[0]
-    
     def determination_ratio(self):
-        self.semi_log()
-        self.log_log()
-        determination_ratio = self.semi_log_r2/self.log_log_r2
+        semi_log_r2 = self.semi_log()[0]
+        log_log_r2 = self.log_log()[0]
+        determination_ratio = semi_log_r2/log_log_r2
         if determination_ratio>1:
             self.normalization_method="Semi-log"
         else:
             self.normalization_method="Log-log"
     
+
     def coefficient_of_determination(self):
-        self.determination_ratio()
+        # how close the data are to the fitted regression (indicative of the level of explained variability in the data set)
         if self.normalization_method=="Semi-log":
-            return round(self.semi_log_r2, 2)
+            return round(self.semi_log()[0], 2)
         else:
-            return round(self.log_log_r2, 2)
+            return round(self.log_log()[0], 2)
             
-    def sholl_regression_coefficient(self):
-        self.determination_ratio()
-        if self.normalization_method=="Semi-log":
-            return round(self.semi_log_sholl_regression_coefficient, 2)
-        else:
-            return round(self.log_log_sholl_regression_coefficient, 2)
-    
+
     def regression_intercept(self):
-        self.determination_ratio()
+        # Y intercept of the logarithmic plot
         if self.normalization_method=="Semi-log":
-            return round(self.semi_log_regression_intercept, 2)
+            return round(self.semi_log()[1], 2)
         else:
-            return round(self.log_log_regression_intercept, 2)
+            return round(self.log_log()[1], 2)
 
 
-class pca:
+    def sholl_regression_coefficient(self):
+        # rate of decay of no. of branches
+        if self.normalization_method=="Semi-log":
+            return round(self.semi_log()[2], 2)
+        else:
+            return round(self.log_log()[2], 2)
 
-    def __init__(self, groups_folders, image_type, label, save_features=True, show_sholl_plots=True, shell_step_size=3):
-        self.show_sholl_plots = show_sholl_plots
+    
+
+class PCA:
+    """
+    """
+
+    def __init__(self, groups_folders, image_type, label, save_features=True, show_sholl_plot=True, shell_step_size=3):
+
+        """
+        Args:
+
+        groups_folders (list): name of the input data folders corresponding to different subgroups
+        image_type (string): 'confocal' or 'DAB'
+        label (dictionary): group labels to be used for pca plots
+        save_features (True/False): create text files containing feature values
+        show_sholl_plot (True/False): show group sholl plot
+        shell_step_size (scalar): difference between concentric circles
+
+        """
+
+        self.show_sholl_plot = show_sholl_plot
         self.image_type = image_type
         self.label = label
+        self.shell_step_size = shell_step_size
 
         dataset = self.read_images(groups_folders)
         self.features = self.get_features(dataset)
@@ -733,14 +763,10 @@ class pca:
                                 'avg_length_of_tertiary_branches', 'avg_length_of_quatenary_branches', 'avg_length_of_terminal_branches', 
                                 'critical_radius', 'critical_value', 'enclosing_radius', 'ramification_index', 'skewness', 'coefficient_of_determination', 
                                 'sholl_regression_coefficient', 'regression_intercept']
-
-        # self.ttest()
-
         if save_features==True:
             self.save_features()
-
-        if show_sholl_plots==True:
-            self.show_avg_sholl_plots(shell_step_size)
+        if show_sholl_plot==True:
+            self.show_avg_sholl_plot(shell_step_size)
 
 
     def read_images(self, groups_folders):
@@ -762,7 +788,7 @@ class pca:
         dataset_features=[]
         self.targets=[]
 
-        if self.show_sholl_plots==True:
+        if self.show_sholl_plot==True:
             self.sholl_original_plots=[]
             self.sholl_polynomial_plots=[]
             self.polynomial_models=[]
@@ -770,7 +796,6 @@ class pca:
         self.group_counts=[]
         cell_count=0
         for group_no, group in enumerate(dataset):
-
             group_cell_count=0
             for cell_no, cell_image in enumerate(group):
 
@@ -782,12 +807,10 @@ class pca:
                 self.targets.append(group_no)
 
                 cell_features=[]
+
                 astrocyte = Cell(cell_image, self.image_type)
                 skeleton = Skeleton(cell_image, self.image_type)
-                sholl = Sholl(cell_image, self.image_type)
-
-                # cell_features.append(astrocyte.entropy_complexity()[0])
-                # cell_features.append(astrocyte.entropy_complexity()[1])
+                sholl = Sholl(cell_image, self.image_type, self.shell_step_size)
 
                 cell_features.append(astrocyte.surface_area())
                 cell_features.append(skeleton.total_length())
@@ -804,7 +827,6 @@ class pca:
                 cell_features.append(skeleton.get_tertiary_branches()[2])
                 cell_features.append(skeleton.get_quatenary_branches()[2])
                 cell_features.append(skeleton.get_terminal_branches()[2])
-    
                 cell_features.append(sholl.critical_radius())
                 cell_features.append(sholl.critical_value())
                 cell_features.append(sholl.enclosing_radius())
@@ -814,7 +836,7 @@ class pca:
                 cell_features.append(sholl.sholl_regression_coefficient())
                 cell_features.append(sholl.regression_intercept())
 
-                if self.show_sholl_plots==True:
+                if self.show_sholl_plot==True:
                     self.sholl_original_plots.append((sholl.distances_from_soma, sholl.no_of_intersections))
                     self.sholl_polynomial_plots.append((sholl.non_zero_distances_from_soma, sholl.non_zero_no_of_intersections))
                     self.polynomial_models.append(sholl.polynomial_model)
@@ -840,26 +862,7 @@ class pca:
                 save_to_file(self.file_names[cell_no], self.feature_names[feature_no], feature_val)
 
 
-    def ttest(self):
-
-        # print(self.features)
-        feature_matrix_1 = np.array(self.features[:self.group_counts[0]])
-        feature_matrix_2 = np.array(self.features[self.group_counts[0]:])
-        for no, name in enumerate(self.feature_names):
-            current_feature_vector_1 = feature_matrix_1[:, no]
-            current_feature_vector_2 = feature_matrix_2[:, no]
-            print(name)
-            print("Saline")
-            print(current_feature_vector_1)
-            print("Mean: ", np.mean(current_feature_vector_1))
-            print("SE: ", scipy.stats.sem(current_feature_vector_1))
-            print("Desipramine")
-            print(current_feature_vector_2)
-            print("Mean: ", np.mean(current_feature_vector_2))
-            print("SE: ", scipy.stats.sem(current_feature_vector_2))
-            print("p-value: ", scipy.stats.ttest_ind(current_feature_vector_1, current_feature_vector_2)[1])
-
-    def show_avg_sholl_plots(self, shell_step_size):
+    def show_avg_sholl_plot(self, shell_step_size):
 
         original_plots_file = 'Original plots'
         polynomial_plots_file = 'Polynomial plots'
@@ -889,7 +892,6 @@ class pca:
                 largest_radius.append(max(plot[0]))
                 no_of_intersections.append(plot[1])
 
-
         group_radiuses=[]
         sholl_intersections=[]
         for group_no, count in enumerate(self.group_counts):
@@ -904,7 +906,6 @@ class pca:
             for intersections in current_intersections:
                 for i, intersection_val in enumerate(intersections):
                     intersection_dict[current_radiuses[i]].append(intersection_val) 
-
             sholl_intersections.append(intersection_dict)
 
         with open(path+"Sholl values", 'w') as text_file:
@@ -912,7 +913,6 @@ class pca:
                 text_file.write("Group: {}\n".format(group_no))
                 for radius, intersections in group_sholl.items():
                     text_file.write("{} {}\n".format(radius, intersections))
-
 
         for group_no, group_sholl in enumerate(sholl_intersections):
             x=[]
@@ -923,9 +923,7 @@ class pca:
                 intersections = (intersections + self.group_counts[group_no] * [0])[:self.group_counts[group_no]]
                 y.append(np.mean(intersections))
                 e.append(scipy.stats.sem(intersections))
-                
             plt.errorbar(x, y, yerr=e, label=self.label[group_no])
-
 
         plt.xlabel("Distance from soma")
         plt.ylabel("No. of intersections")
@@ -933,10 +931,7 @@ class pca:
         plt.show()
 
 
-
     def plot(self, color_dict, marker):
-
-        from sklearn.cluster import KMeans
 
         self.marker = marker
 
@@ -962,10 +957,10 @@ class pca:
             return Ellipse(xy=centre, width=width, height=height, angle=np.degrees(theta), **kwargs)
 
 
-        pca_object = PCA(2)
+        pca_object = decomposition.PCA(2)
 
         # Scale data
-        scaler = MaxAbsScaler()
+        scaler = preprocessing.MaxAbsScaler()
         scaler.fit(self.features)
         X=scaler.transform(self.features)
 
