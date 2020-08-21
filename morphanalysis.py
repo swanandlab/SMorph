@@ -29,6 +29,8 @@ from sklearn.cluster import KMeans
 
 
 # write class definitions in comments
+# document what text file represents
+# in between notebook explanation
 
 
 class Cell:
@@ -41,7 +43,7 @@ class Cell:
 
         cell_image: RGB cell image
         image_type: 'confocal' or 'DAB'
-        reference_image
+        reference_image: all images can be standardised to the exposure level of this example cell image
 
         """
 
@@ -733,7 +735,7 @@ class Sholl:
 
     
 
-class PCA:
+class analyze_cells:
     """
     """
 
@@ -849,7 +851,9 @@ class PCA:
 
     def save_features(self):
         directory = os.getcwd()+'/Features'
-        if not os.path.exists(directory):
+        if os.path.exists(directory) and os.path.isdir(directory):
+            shutil.rmtree(directory)
+        else:
             os.mkdir(directory)
 
         def save_to_file(file_name, feature_name, feature_value):
@@ -863,12 +867,14 @@ class PCA:
 
 
     def show_avg_sholl_plot(self, shell_step_size):
-
         original_plots_file = 'Original plots'
         polynomial_plots_file = 'Polynomial plots'
 
         directory = os.getcwd()+'/Sholl Results'
-        if not os.path.exists(directory):
+
+        if os.path.exists(directory) and os.path.isdir(directory):
+            shutil.rmtree(directory)
+        else:
             os.mkdir(directory)
 
         path = os.getcwd()+'/Sholl Results/'
@@ -931,7 +937,7 @@ class PCA:
         plt.show()
 
 
-    def plot(self, color_dict, marker):
+    def pca(self, color_dict, marker):
 
         self.marker = marker
 
@@ -992,12 +998,9 @@ class PCA:
             first_component_mean = np.mean(first_component[ix])
             second_component_mean = np.mean(second_component[ix])
             cov = np.cov(first_component, second_component)
-
             ax.scatter(first_component[ix], second_component[ix], c=color_dict[l], s=40, label=self.label[l], marker=marker[l])
-
             e = get_cov_ellipse(cov, (first_component_mean, second_component_mean), no_of_std, fc=color_dict[l], alpha=0.4)
             ax.add_artist(e)
-
 
         plt.xlabel("PC 1 (Variance: %.1f%%)" % (first_component_var*100), fontsize=14)
         plt.ylabel("PC 2 (Variance: %.1f%%)" % (second_component_var*100), fontsize=14)
@@ -1006,7 +1009,6 @@ class PCA:
 
 
     def plot_feature_histograms(self):
-
         fig, axes = plt.subplots(12, 2, figsize=(15, 12)) # 2 columns each containing 13 figures, total 22 features
         data = np.array(self.features)
         ko = data[np.where(np.array(self.targets) == 0)[0]] # define ko
@@ -1027,7 +1029,6 @@ class PCA:
 
 
     def plot_feature_significance_heatmap(self):
-
         sorted_significance_order = np.flip(np.argsort(abs(self.feature_significance[0])))
         sorted_feature_significance = np.zeros(self.feature_significance.shape)
         sorted_feature_significance[0] = np.array(self.feature_significance[0])[sorted_significance_order]
@@ -1040,8 +1041,8 @@ class PCA:
         plt.xticks(range(len(sorted_feature_names)), sorted_feature_names, rotation=65, ha='left')
         plt.show()
 
-    def plot_feature_significance_vectors(self):
 
+    def plot_feature_significance_vectors(self):
         score = self.projected
         coeff = np.transpose(self.feature_significance)
         labels=self.feature_names
