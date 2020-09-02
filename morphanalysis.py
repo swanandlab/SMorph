@@ -1,4 +1,5 @@
 import os
+import shutil
 import copy
 import pickle
 import math
@@ -12,7 +13,6 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 
 import skimage.io as io
-# from skimage.color import rgb2gray
 from skimage.transform import rescale
 from skimage.feature import blob_log
 from skimage.morphology import closing, square
@@ -28,13 +28,10 @@ from sklearn import decomposition
 from sklearn.cluster import KMeans
 
 
-# write class definitions in comments
-# document what text file represents
-# in between notebook explanation
-
 
 class Cell:
     """
+    Extract the individual cell by thresholding and removing background noise. 
     """
 
     def __init__(self, cell_image, image_type, reference_image=None):
@@ -188,6 +185,7 @@ class Cell:
 
 class Skeleton:
     """
+    Skeletonize the thresholded image and extract relevant features from the 2D skeleton.
     """
 
     def __init__(self, cell_image, image_type):
@@ -508,6 +506,7 @@ class Skeleton:
 
 class Sholl:
     """
+    Extract radius and no. of intersections for sholl analyses and other relevant features from the resulting sholl plot. 
     """
 
     def __init__(self, cell_image, image_type, shell_step_size, polynomial_degree=3):
@@ -737,6 +736,7 @@ class Sholl:
 
 class analyze_cells:
     """
+    Extract features of all the cells in different groups and implement PCA and group level sholl analysis.
     """
 
     def __init__(self, groups_folders, image_type, label, save_features=True, show_sholl_plot=True, shell_step_size=3):
@@ -853,6 +853,7 @@ class analyze_cells:
         directory = os.getcwd()+'/Features'
         if os.path.exists(directory) and os.path.isdir(directory):
             shutil.rmtree(directory)
+            os.mkdir(directory)
         else:
             os.mkdir(directory)
 
@@ -874,6 +875,7 @@ class analyze_cells:
 
         if os.path.exists(directory) and os.path.isdir(directory):
             shutil.rmtree(directory)
+            os.mkdir(directory)
         else:
             os.mkdir(directory)
 
