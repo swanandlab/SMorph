@@ -67,7 +67,7 @@ class Cell:
                 # find the blobs too close to border so as to eliminate them
                 blobs_dict = defaultdict()
                 for i, blob in enumerate(blobs_log):
-                    blobs_dict[i] = np.take(blob, [0,1,3])
+                    blobs_dict[i] = np.take(blob, [0,1,2])
                     y, x, r = blobs_dict[i]
                     image_border_x, image_border_y = self.cell_image.shape[1]/5, self.cell_image.shape[0]/5
                     if x < image_border_x or x > 4*image_border_x or y < image_border_y or y > 4*image_border_y:
