@@ -163,14 +163,14 @@ class Cell:
 
     def remove_small_object_noise(self):
         labelled_image, no_of_objects = self.label_objects()
-        object_areas = []
-        for object_label in range(1, no_of_objects+1):
-        # for object_label in range(no_of_objects):
-            object_areas.append(len(np.where(labelled_image==[object_label])[0]))
-      
-        largest_object_label = np.argmax(object_areas)+1
-        astrocyte_image = np.where(labelled_image==[largest_object_label], 1, 0)
-        
+        # TODO: decide removal of unused variable
+        labelled_image_1D = labelled_image.reshape(labelled_image.size)
+        object_areas = np.bincount(labelled_image_1D[labelled_image_1D != 0])
+
+        largest_object_label = np.argmax(object_areas)
+        astrocyte_image = np.where(
+            labelled_image == [largest_object_label], 1, 0)
+
         return astrocyte_image
 
 
