@@ -1,14 +1,16 @@
 import os
 import shutil
 import copy
-import pickle
 import math
 import skimage
 import sklearn
 import scipy
 import numpy as np
+import pandas as pd
+import seaborn as sns
 
 from collections import defaultdict
+from itertools import cycle, islice
 import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 
@@ -22,10 +24,11 @@ from skimage.measure import label
 import skan
 from skan import skeleton_to_csgraph
 
-from sklearn import preprocessing
-from sklearn import linear_model
-from sklearn import decomposition
+from sklearn import decomposition, linear_model, metrics, preprocessing
 from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
+from pandas.plotting import parallel_coordinates
+import ipyvolume as ipv
 
 
 class Cell:
@@ -1070,3 +1073,155 @@ class analyze_cells:
         ax.set_xlabel("PC {}".format(1))
         ax.set_ylabel("PC {}".format(2))
         plt.show()
+
+    def get_clusters(self, k=None, use_features=True, n_PC=None, plot='parallel'):
+        """
+        Highly configurable K-Means clustering & visualization of cell data.
+
+        Parameters
+        ----------
+        k : int or None, default None
+            If greater than 1, return k number of clusters. Else if None it is
+            autoselected, on basis of maximum Calinski Harabasz Score.
+        use_features : bool, default True
+            If True, clustering would use original set of morphometric features.
+        n_PC : int or None, default None
+            If greater than 1, return n_PC number of Principal Components after
+            clustering. If None & use_features is False, it's autoselected as
+            number of Principal Components calculated.
+        plot : str or None, default 'parallel'
+            The type of plot user would like to get, either parallel or scatter.
+
+        Returns
+        -------
+        centers_df
+            A DataFrame with normalized center coordinates of each cluster.
+        df
+            A DataFrame with normalized cell coordinates & the respective
+            cluster to which they belong.
+        """
+        n_cells = len(self.features)
+        seed = np.random.randint(0, n_cells)  # for deterministic randomness
+
+        if k != None and (k < 2 or k > n_cells):
+            raise ValueError('Number of clusters, k, must be greater than 1 & '
+                             'lesser than the total number of cells.')
+
+        def compute_clusters(n_clusters, normalized_features, max_clusters):
+            best_variance_ratio, best_k, best_model = 0, 0, None
+            K = range(2, max_clusters +
+                      1) if n_clusters == None else [n_clusters]
+
+            # Either autoselect least varying K-Means model or use specified k
+            for k in K:
+                # convergence is costly, better to prespecify k
+                model = KMeans(n_clusters=k, random_state=seed).fit(
+                    normalized_features)
+                variance_ratio = metrics.calinski_harabasz_score(
+                    normalized_features, model.labels_)
+                if variance_ratio > best_variance_ratio:
+                    best_variance_ratio = variance_ratio
+                    best_model = model
+                    best_k = k
+
+            return best_k, best_model, best_variance_ratio
+
+        if use_features:
+            if n_PC == None:
+                scaler = preprocessing.MaxAbsScaler()
+                features = self.features
+                df = pd.DataFrame(scaler.fit(features).transform(features))
+            else:
+                raise ValueError('Cannot use morphological features & n_PC '
+                                 'simultaneously')
+        else:
+            if not hasattr(self, 'projected'):
+                raise RuntimeError('Principal Components must be found before '
+                                   'clustering in their feature space.')
+
+            projected = self.projected
+
+            if n_PC is None:
+                # autoselect n_PC as number of computed Principal Components
+                n_PC = projected.shape[1]
+
+            if 1 < n_PC <= projected.shape[1]:
+                df = pd.DataFrame(projected[:, :n_PC])
+            else:
+                raise ValueError('Number of Principal Components, n_PC, should be '
+                                 'greater than 1 & less than or equal to the total '
+                                 'number of Principal Components of cells.')
+
+        normalized_feature_vector = np.array(df)
+
+        # TODO: this max_cluster value isn't feasible for large dataset
+        k, kmeans_model, variance_ratio = compute_clusters(
+            k, normalized_feature_vector, n_cells // 4)
+
+        # creates a dataframe with a column for cluster number
+        centers_df = pd.DataFrame(kmeans_model.cluster_centers_)
+        centers_df['cluster'] = range(k)
+
+        LABEL_COLOR_MAP = sns.color_palette(None, k)
+
+        def parallel_plot(data):
+            plt.figure(figsize=(15, 8)).gca().axes.set_ylim([-3, 3])
+            parallel_coordinates(data, 'cluster',
+                                 color=LABEL_COLOR_MAP, marker='o')
+
+        def scatter_plot(data, centers):
+            l_idx = r_idx = 0
+            label_color = [LABEL_COLOR_MAP[l] for l in kmeans_model.labels_]
+
+            if data.shape[1] == 2:
+                MARKERS = cycle(['*', 'o', 's', 'p', '+', 'x', '^'])
+
+                plt.scatter(centers[:, 0], centers[:, 1],
+                            45, LABEL_COLOR_MAP, 'd')
+
+                for cells in self.group_counts:
+                    r_idx += cells
+                    plt.scatter(data[l_idx:r_idx, 0], data[l_idx:r_idx, 1], 40,
+                                label_color[l_idx:r_idx], next(MARKERS))
+                    l_idx += cells
+
+                plt.xlabel('PC1'), plt.ylabel('PC2')
+                plt.show()
+            elif data.shape[1] == 3:  # ipyvolume 3D scatter plot
+                # assuming 2 classes: stab & ctrl
+                MARKERS = cycle(['box', 'sphere', 'arrow', 'point_2d',
+                                 'square_2d', 'triangle_2d', 'circle_2d'])
+
+                fig = ipv.figure()
+                ipv.scatter(centers[:, 0], centers[:, 1], centers[:, 2],
+                            LABEL_COLOR_MAP, 5, 5.6, marker='diamond')
+
+                for cells in self.group_counts:
+                    r_idx += cells
+                    ipv.scatter(data[l_idx:r_idx, 0], data[l_idx:r_idx, 1],
+                                data[l_idx:r_idx, 2], label_color[l_idx:r_idx],
+                                4, 4.6, marker=next(MARKERS))
+                    l_idx += cells
+
+                ipv.xyzlabel('PC1', 'PC2', 'PC3')
+                ipv.show()
+
+        if plot == 'parallel':
+            parallel_plot(centers_df)
+        elif plot == 'scatter':
+            if n_PC in [2, 3]:
+                scatter_plot(normalized_feature_vector,
+                             kmeans_model.cluster_centers_)
+            else:
+                raise ValueError('Scatter plot can only be in 2D or 3D.')
+        else:
+            raise ValueError('Plot must be either of parallel or scatter.')
+
+        print(f'k = {k} clusters with Variance Ratio = {variance_ratio}')
+        print(f'seed = {seed}')
+        print('Using', ('principal components',
+                        'morphometric features')[use_features])
+
+        df['cluster'] = kmeans_model.labels_
+
+        return centers_df, df
