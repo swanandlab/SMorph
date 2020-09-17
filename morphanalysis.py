@@ -1,7 +1,6 @@
 import os
 import shutil
 import copy
-import math
 import skimage
 import sklearn
 import scipy
@@ -550,7 +549,7 @@ class Sholl:
             for radius in concentric_radiuses:
                 lhs = (
                     x - self.soma_on_padded_skeleton[0])**2 + (y - self.soma_on_padded_skeleton[1])**2
-                if abs((math.sqrt(lhs)-radius)) < 0.9:
+                if abs((np.sqrt(lhs)-radius)) < 0.9:
                     concentric_coordinates[radius].append((x, y))
                     concentric_coordinates_intensities[radius].append(value)
 
@@ -667,7 +666,7 @@ class Sholl:
     def semi_log(self):
         # no. of intersections/circumference
         normalized_y = np.log(
-            self.non_zero_no_of_intersections/(2*math.pi*self.non_zero_distances_from_soma))
+            self.non_zero_no_of_intersections/(2*np.pi*self.non_zero_distances_from_soma))
         reshaped_x = self.non_zero_distances_from_soma.reshape((-1, 1))
         model = linear_model.LinearRegression().fit(reshaped_x, normalized_y)
 
@@ -683,7 +682,7 @@ class Sholl:
     def log_log(self):
         # no. of intersections/circumference
         normalized_y = np.log(
-            self.non_zero_no_of_intersections/(2*math.pi*self.non_zero_distances_from_soma))
+            self.non_zero_no_of_intersections/(2*np.pi*self.non_zero_distances_from_soma))
         reshaped_x = self.non_zero_distances_from_soma.reshape((-1, 1))
         normalized_x = np.log(reshaped_x)
         model = linear_model.LinearRegression().fit(normalized_x, normalized_y)
@@ -1191,7 +1190,6 @@ class analyze_cells:
                 MARKERS = cycle(['box', 'sphere', 'arrow', 'point_2d',
                                  'square_2d', 'triangle_2d', 'circle_2d'])
 
-                fig = ipv.figure()
                 ipv.scatter(centers[:, 0], centers[:, 1], centers[:, 2],
                             LABEL_COLOR_MAP, 5, 5.6, marker='diamond')
 
