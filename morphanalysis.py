@@ -52,9 +52,9 @@ class Cell:
         self.inverted_gray_cell_image = skimage.util.invert(
             self.gray_cell_image)
         self.reference_image = reference_image
-        self.threshold_image = self.threshold_image()
-        self.inverted_threshold_image = skimage.util.invert(
-            self.threshold_image)
+        self.thresholded_image = self.threshold_image()
+        self.inverted_thresholded_image = skimage.util.invert(
+            self.thresholded_image)
         self.cleaned_image = self.remove_small_object_noise()
         self.cleaned_image_filled_holes = self.fill_holes()
 
@@ -159,7 +159,7 @@ class Cell:
             return skimage.util.invert(thresholded_cell)
 
     def label_objects(self):
-        bw = closing(self.inverted_threshold_image, square(1))
+        bw = closing(self.inverted_thresholded_image, square(1))
         # label image regions
         labelled_image, no_of_objects = skimage.measure.label(
             bw, return_num=True)
