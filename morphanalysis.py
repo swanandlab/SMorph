@@ -63,32 +63,32 @@ class Cell:
 
         if self.image_type == "DAB":
             blobs_log = blob_log(self.inverted_gray_cell_image, min_sigma=6,
-                                 max_sigma=20, num_sigma=10, threshold=0.1, overlap=0.5)
+                                 max_sigma=20, num_sigma=10, threshold=0.1,
+                                 overlap=0.5)
         elif self.image_type == "confocal":
-            blobs_log = blob_log(self.cell_image, min_sigma=3,
-                                 max_sigma=20, num_sigma=10, threshold=0.1, overlap=0.5)
+            # assuming cell_image has single color channel
+            blobs_log = blob_log(self.cell_image, min_sigma=3, max_sigma=20,
+                                 num_sigma=10, threshold=0.1, overlap=0.5)
 
             def eliminate_border_blobs(blobs_log):
                 # find the blobs too close to border so as to eliminate them
-                blobs_dict = defaultdict()
-                for i, blob in enumerate(blobs_log):
-                    blobs_dict[i] = np.take(blob, [0, 1, 2])
-                    y, x, r = blobs_dict[i]
-                    image_border_x, image_border_y = self.cell_image.shape[1] / \
-                        5, self.cell_image.shape[0]/5
-                    if x < image_border_x or x > 4*image_border_x or y < image_border_y or y > 4*image_border_y:
-                        blobs_dict.pop(i)
-                blobs_log = []
-                for key, blobs in blobs_dict.items():
-                    blobs_log.append(blobs)
-                return blobs_log
+                border_x = self.cell_image.shape[1] / 5
+                border_y = self.cell_image.shape[0] / 5
+
+                filtered_blobs = blobs_log[(border_x < blobs_log[:, 1]) &
+                                           (blobs_log[:, 1] < 4*border_x) &
+                                           (border_y < blobs_log[:, 0]) &
+                                           (blobs_log[:, 0] < 4*border_y)]
+
+                return filtered_blobs
 
             blobs_log = eliminate_border_blobs(blobs_log)
 
             if len(blobs_log) < 1:
-                # if none of the blobs remain after border blob elimination, try blob_log with less stringent parameters
-                blobs_log = blob_log(
-                    self.cell_image, min_sigma=2, max_sigma=20, num_sigma=10, threshold=0.1, overlap=0.5)
+                # if none of the blobs remain after border blob elimination,
+                # try blob_log with less stringent parameters
+                blobs_log = blob_log(self.cell_image, min_sigma=2, max_sigma=20,
+                                     num_sigma=10, threshold=0.1, overlap=0.5)
                 blobs_log = eliminate_border_blobs(blobs_log)
 
         return blobs_log
@@ -99,21 +99,21 @@ class Cell:
         # find the blob with highest intensity value
         ixs = np.indices(self.gray_cell_image.shape)
 
-        blob_intensities = []
-        blob_centres = []
-        blob_radiuses = []
+        n_blobs = blobs.shape[0]
+        blob_centres = blobs[:, 0:2]
+        blob_radii = blobs[:, 2]
 
-        for blob in blobs:
-            y, x, r = blob
-            # Define an array of shape `[2, 1, 1]`, containing the center of the blob
-            blob_center = np.array([y, x])[:, np.newaxis, np.newaxis]
-            # Using the formula for a circle, `x**2 + y**2 < r**2`, generate a mask for this blob.
-            mask = ((ixs - blob_center)**2).sum(axis=0) < r**2
-            # Calculate the average intensity of pixels under the mask
-            blob_avg_est = self.gray_cell_image[mask].mean()
-            blob_intensities.append(blob_avg_est)
-            blob_centres.append((y, x))
-            blob_radiuses.append(r)
+        centres = blob_centres[..., np.newaxis, np.newaxis]
+        radii = np.square(blob_radii)[:, np.newaxis, np.newaxis]
+        # Using the formula for a circle, `x**2 + y**2 < r**2`,
+        # generate a mask for all blobs.
+        mask = np.square(ixs - centres).sum(axis=1) < radii
+        # Calculate the average intensity of pixels under the mask
+        blob_intensities = np.full(
+            (n_blobs, *ixs.shape[1:]), self.gray_cell_image)
+        blob_intensities = (blob_intensities * mask).reshape(mask.shape[0], -1)
+        blob_intensities = np.divide(
+            blob_intensities.sum(1), (blob_intensities != 0).sum(1))
 
         if self.image_type == "DAB":
             max_intensity = blob_centres[np.argmin(blob_intensities)]
@@ -121,12 +121,11 @@ class Cell:
             return max_intensity
 
         elif self.image_type == "confocal":
-            max_radius = blob_centres[np.argmax(blob_radiuses)]
+            max_radius = blob_centres[np.argmax(blob_radii)]
             max_intensity = blob_centres[np.argmax(blob_intensities)]
-            if len(blob_radiuses) > len(set(blob_radiuses)):
+            if len(blob_radii) > len(set(blob_radii)):
                 return max_intensity
-            else:
-                return max_radius
+            return max_radius
 
     def get_soma(self):
         # calculate pixel position to be attribute as soma
@@ -183,7 +182,7 @@ class Cell:
         return scipy.ndimage.binary_fill_holes(self.cleaned_image).astype(int)
 
     def surface_area(self):
-        return np.sum(self.cleaned_image)
+        return np.sum(self.cleaned_image_filled_holes)
 
 
 class Skeleton:
