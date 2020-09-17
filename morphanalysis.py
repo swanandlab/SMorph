@@ -932,7 +932,11 @@ class analyze_cells:
         plt.legend()
         plt.show()
 
-    def pca(self, color_dict, marker):
+    def pca(self, n_PC, color_dict, marker):
+
+        if n_PC < 2 or n_PC > len(self.features):
+            raise ValueError('Principal Components must be greater than 1 & '
+                             'less than number of morphological features.')
 
         self.marker = marker
 
@@ -957,7 +961,7 @@ class analyze_cells:
 
             return Ellipse(xy=centre, width=width, height=height, angle=np.degrees(theta), **kwargs)
 
-        pca_object = decomposition.PCA(2)
+        pca_object = decomposition.PCA(n_PC)
 
         # Scale data
         scaler = preprocessing.MaxAbsScaler()
@@ -1104,6 +1108,9 @@ class analyze_cells:
         if k != None and (k < 2 or k > n_cells):
             raise ValueError('Number of clusters, k, must be greater than 1 & '
                              'lesser than the total number of cells.')
+        
+        if plot not in [None, 'parallel', 'scatter']:
+            raise ValueError('Plot must be either of parallel or scatter.')
 
         def compute_clusters(n_clusters, normalized_features, max_clusters):
             best_variance_ratio, best_k, best_model = 0, 0, None
@@ -1149,6 +1156,9 @@ class analyze_cells:
                 raise ValueError('Number of Principal Components, n_PC, should be '
                                  'greater than 1 & less than or equal to the total '
                                  'number of Principal Components of cells.')
+        
+        if n_PC not in [2, 3] and plot == 'scatter':
+            raise ValueError('Scatter plot can only be in 2D or 3D.')
 
         normalized_feature_vector = np.array(df)
 
@@ -1203,16 +1213,13 @@ class analyze_cells:
                 ipv.xyzlabel('PC1', 'PC2', 'PC3')
                 ipv.show()
 
-        if plot == 'parallel':
-            parallel_plot(centers_df)
-        elif plot == 'scatter':
-            if n_PC in [2, 3]:
+
+        if plot != None:
+            if plot == 'parallel':
+                parallel_plot(centers_df)
+            elif plot == 'scatter':
                 scatter_plot(normalized_feature_vector,
-                             kmeans_model.cluster_centers_)
-            else:
-                raise ValueError('Scatter plot can only be in 2D or 3D.')
-        else:
-            raise ValueError('Plot must be either of parallel or scatter.')
+                            kmeans_model.cluster_centers_)
 
         print(f'k = {k} clusters with Variance Ratio = {variance_ratio}')
         print(f'seed = {seed}')
