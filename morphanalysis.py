@@ -757,6 +757,7 @@ class analyze_cells:
                               'avg_length_of_tertiary_branches', 'avg_length_of_quatenary_branches', 'avg_length_of_terminal_branches',
                               'critical_radius', 'critical_value', 'enclosing_radius', 'ramification_index', 'skewness', 'coefficient_of_determination',
                               'sholl_regression_coefficient', 'regression_intercept']
+        self.pca_features = None
         if save_features == True:
             self.save_features()
         if show_sholl_plot == True:
@@ -932,12 +933,51 @@ class analyze_cells:
         plt.legend()
         plt.show()
 
-    def pca(self, n_PC, color_dict, marker):
+    def pca(self, n_PC, color_dict, marker, on_features=None):
+        """Principal Component Analysis of morphological features of cells.
 
-        if n_PC < 2 or n_PC > len(self.features):
+        Parameters
+        ----------
+        n_PC : int
+            If greater than 1, return n_PC number of Principal Components after
+            clustering. If None & use_features is False, it's autoselected as
+            number of Principal Components calculated.
+        color_dict : dict
+            Dict with color to be used for each group.
+        marker : dict
+            Dict with marker for each group to be used in PCA plot.
+        on_features : list, optional
+            List of names of morphological features from which Principal
+            Components will be derived, by default None.
+            If None, all 23 morphological features will be used.
+
+        Returns
+        -------
+        var_PCs : ndarray
+            Captured variance ratios of each Principal Component.
+
+        Raises
+        ------
+        ValueError
+            * If n_PC isn't greater than 1 & less than the total number of
+            morphological features of cells.
+            * If element(s) of on_features is/are not in list of all
+            morphological features.
+
+        """
+        all_features = self.feature_names
+
+        if n_PC < 2 or n_PC >= len(all_features):
             raise ValueError('Principal Components must be greater than 1 & '
                              'less than number of morphological features.')
 
+        if on_features == None:
+            on_features = all_features
+        elif not all(feature in all_features for feature in set(on_features)):
+            raise ValueError('Selected Principal Components are not a subset '
+                             'of the original set of morphological features.')
+
+        self.pca_features = on_features
         self.marker = marker
 
         def get_cov_ellipse(cov, centre, nstd, **kwargs):
@@ -959,14 +999,18 @@ class analyze_cells:
             # Width and height of ellipse to draw
             width, height = nstd * np.sqrt(eigvals)
 
-            return Ellipse(xy=centre, width=width, height=height, angle=np.degrees(theta), **kwargs)
+            return Ellipse(centre, width, height, np.degrees(theta), **kwargs)
+
+        # TODO: Modify after feature attribute is converted to DataFrame
+        df = pd.DataFrame(self.features, columns=all_features)
+        subset_features = df[on_features].to_numpy()
 
         pca_object = decomposition.PCA(n_PC)
 
         # Scale data
         scaler = preprocessing.MaxAbsScaler()
-        scaler.fit(self.features)
-        X = scaler.transform(self.features)
+        scaler.fit(subset_features)
+        X = scaler.transform(subset_features)
 
         # fit on data
         pca_object.fit(X)
@@ -975,39 +1019,42 @@ class analyze_cells:
         self.feature_significance = pca_object.components_
 
         # variance captured by principal components
-        first_component_var = pca_object.explained_variance_ratio_[0]
-        second_component_var = pca_object.explained_variance_ratio_[1]
+        var_PCs = pca_object.explained_variance_ratio_
 
         # transform data
         self.projected = pca_object.transform(X)
 
-        first_component = self.projected[:, 0]
-        second_component = self.projected[:, 1]
+        PC_1 = self.projected[:, 0]
+        PC_2 = self.projected[:, 1]
 
-        with open("pca values", 'w') as text_file:
-            text_file.write("First component:\n{}\nSecond component:\n{}".format(
-                first_component, second_component))
+        PC_COLUMN_NAMES = [f'PC {i + 1}' for i in range(n_PC)]
+        pca_values = pd.DataFrame(data=self.projected, columns=PC_COLUMN_NAMES)
 
-        no_of_std = 3  # no. of standard deviations to show
-        fig, ax = plt.subplots()
-        fig.patch.set_facecolor('white')
-        for l in np.unique(self.targets):
-            ix = np.where(self.targets == l)
-            first_component_mean = np.mean(first_component[ix])
-            second_component_mean = np.mean(second_component[ix])
-            cov = np.cov(first_component, second_component)
-            ax.scatter(first_component[ix], second_component[ix],
-                       c=color_dict[l], s=40, label=self.label[l], marker=marker[l])
-            e = get_cov_ellipse(
-                cov, (first_component_mean, second_component_mean), no_of_std, fc=color_dict[l], alpha=0.4)
-            ax.add_artist(e)
+        pca_values.to_csv('pca values.csv', index=False)
 
-        plt.xlabel("PC 1 (Variance: %.1f%%)" %
-                   (first_component_var*100), fontsize=14)
-        plt.ylabel("PC 2 (Variance: %.1f%%)" %
-                   (second_component_var*100), fontsize=14)
-        plt.legend()
-        plt.show()
+        def visualize_two_PCs():
+            n_std = 3  # no. of standard deviations to show
+            fig, ax = plt.subplots()
+            fig.patch.set_facecolor('white')
+            for l in np.unique(self.targets):
+                ix = np.where(self.targets == l)
+                mean_PC_1 = np.mean(PC_1[ix])
+                mean_PC_2 = np.mean(PC_2[ix])
+                cov = np.cov(PC_1, PC_2)
+                ax.scatter(PC_1[ix], PC_2[ix], c=color_dict[l], s=40,
+                           label=self.label[l], marker=marker[l])
+                e = get_cov_ellipse(cov, (mean_PC_1, mean_PC_2),
+                                    n_std, fc=color_dict[l], alpha=0.4)
+                ax.add_artist(e)
+
+            plt.xlabel(f'PC 1 (Variance: {var_PCs[0]*100:.1f})', fontsize=14)
+            plt.ylabel(f'PC 2 (Variance: {var_PCs[1]*100:.1f})', fontsize=14)
+            plt.legend()
+            plt.show()
+        
+        visualize_two_PCs()
+
+        return var_PCs
 
     def plot_feature_histograms(self):
         # 2 columns each containing 13 figures, total 22 features
@@ -1108,7 +1155,7 @@ class analyze_cells:
         if k != None and (k < 2 or k > n_cells):
             raise ValueError('Number of clusters, k, must be greater than 1 & '
                              'lesser than the total number of cells.')
-        
+
         if plot not in [None, 'parallel', 'scatter']:
             raise ValueError('Plot must be either of parallel or scatter.')
 
@@ -1156,7 +1203,7 @@ class analyze_cells:
                 raise ValueError('Number of Principal Components, n_PC, should be '
                                  'greater than 1 & less than or equal to the total '
                                  'number of Principal Components of cells.')
-        
+
         if n_PC not in [2, 3] and plot == 'scatter':
             raise ValueError('Scatter plot can only be in 2D or 3D.')
 
@@ -1213,13 +1260,12 @@ class analyze_cells:
                 ipv.xyzlabel('PC1', 'PC2', 'PC3')
                 ipv.show()
 
-
         if plot != None:
             if plot == 'parallel':
                 parallel_plot(centers_df)
             elif plot == 'scatter':
                 scatter_plot(normalized_feature_vector,
-                            kmeans_model.cluster_centers_)
+                             kmeans_model.cluster_centers_)
 
         print(f'k = {k} clusters with Variance Ratio = {variance_ratio}')
         print(f'seed = {seed}')
