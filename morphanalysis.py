@@ -839,23 +839,17 @@ class analyze_cells:
         return pd.DataFrame(dataset_features, columns=self.feature_names)
 
     def save_features(self):
-        pass
-        # directory = os.getcwd()+'/Features'
-        # if os.path.exists(directory) and os.path.isdir(directory):
-        #     shutil.rmtree(directory)
-        #     os.mkdir(directory)
-        # else:
-        #     os.mkdir(directory)
+        DIR = os.getcwd()+'/Features/'
+        FILENAME = 'features.csv'
+        if os.path.exists(DIR) and os.path.isdir(DIR):
+            shutil.rmtree(DIR)
+            os.mkdir(DIR)
+        else:
+            os.mkdir(DIR)
 
-        # def save_to_file(file_name, feature_name, feature_value):
-        #     path = os.getcwd()+'/Features/'
-        #     with open(path+feature_name+'.txt', 'a') as text_file:
-        #         text_file.write("{} {} \n".format(file_name, feature_value))
-
-        # for cell_no, cell_features in enumerate(self.features):
-        #     for feature_no, feature_val in enumerate(cell_features):
-        #         save_to_file(
-        #             self.file_names[cell_no], self.feature_names[feature_no], feature_val)
+        export_data = self.features.copy()
+        export_data.insert(0, 'cell_image_file', self.file_names)
+        export_data.to_csv(DIR + FILENAME, index=False, mode='w')
 
     def show_avg_sholl_plot(self, shell_step_size):
         original_plots_file = 'Original plots'
