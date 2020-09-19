@@ -1082,12 +1082,11 @@ class analyze_cells:
 
     def plot_feature_significance_heatmap(self):
         n_PC = self.feature_significance.shape[0]
-        sorted_significance_order = np.flip(
-            np.argsort(abs(self.feature_significance[0])))
+        sorted_significance_order = np.argsort(self.feature_significance[0])
         sorted_feature_significance = np.zeros(self.feature_significance.shape)
 
-        def order_by_PC_1_significance(feature_significance):
-            out = np.array(feature_significance)[sorted_significance_order]
+        def order_by_PC_1_significance(significance):
+            out = np.array(significance)[sorted_significance_order]
             return out
 
         sorted_feature_significance = list(map(
@@ -1099,7 +1098,7 @@ class analyze_cells:
         plt.matshow(np.array(sorted_feature_significance), cmap='gist_heat')
         plt.yticks(list(range(n_PC)), [
                    f'PC {i+1}' for i in range(n_PC)], fontsize=10)
-        plt.colorbar()
+        plt.colorbar(orientation='horizontal')
         plt.xticks(range(len(sorted_feature_names)),
                    sorted_feature_names, rotation=65, ha='left')
         plt.show()
