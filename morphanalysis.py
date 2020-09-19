@@ -751,12 +751,12 @@ class analyze_cells:
         self.shell_step_size = shell_step_size
 
         dataset = self.read_images(groups_folders)
-        self.features = self.get_features(dataset)
         self.feature_names = ['surface_area', 'total_length', 'avg_process_thickness', 'convex_hull', 'no_of_forks', 'no_of_primary_branches', 'no_of_secondary_branches',
                               'no_of_tertiary_branches', 'no_of_quatenary_branches', 'no_of_terminal_branches', 'avg_length_of_primary_branches', 'avg_length_of_secondary_branches',
                               'avg_length_of_tertiary_branches', 'avg_length_of_quatenary_branches', 'avg_length_of_terminal_branches',
                               'critical_radius', 'critical_value', 'enclosing_radius', 'ramification_index', 'skewness', 'coefficient_of_determination',
                               'sholl_regression_coefficient', 'regression_intercept']
+        self.features = self.get_features(dataset)
         self.pca_feature_names = None
         if save_features == True:
             self.save_features()
@@ -836,25 +836,26 @@ class analyze_cells:
                 dataset_features.append(cell_features)
 
             self.group_counts.append(group_cell_count)
-        return dataset_features
+        return pd.DataFrame(dataset_features, columns=self.feature_names)
 
     def save_features(self):
-        directory = os.getcwd()+'/Features'
-        if os.path.exists(directory) and os.path.isdir(directory):
-            shutil.rmtree(directory)
-            os.mkdir(directory)
-        else:
-            os.mkdir(directory)
+        pass
+        # directory = os.getcwd()+'/Features'
+        # if os.path.exists(directory) and os.path.isdir(directory):
+        #     shutil.rmtree(directory)
+        #     os.mkdir(directory)
+        # else:
+        #     os.mkdir(directory)
 
-        def save_to_file(file_name, feature_name, feature_value):
-            path = os.getcwd()+'/Features/'
-            with open(path+feature_name+'.txt', 'a') as text_file:
-                text_file.write("{} {} \n".format(file_name, feature_value))
+        # def save_to_file(file_name, feature_name, feature_value):
+        #     path = os.getcwd()+'/Features/'
+        #     with open(path+feature_name+'.txt', 'a') as text_file:
+        #         text_file.write("{} {} \n".format(file_name, feature_value))
 
-        for cell_no, cell_features in enumerate(self.features):
-            for feature_no, feature_val in enumerate(cell_features):
-                save_to_file(
-                    self.file_names[cell_no], self.feature_names[feature_no], feature_val)
+        # for cell_no, cell_features in enumerate(self.features):
+        #     for feature_no, feature_val in enumerate(cell_features):
+        #         save_to_file(
+        #             self.file_names[cell_no], self.feature_names[feature_no], feature_val)
 
     def show_avg_sholl_plot(self, shell_step_size):
         original_plots_file = 'Original plots'
@@ -1001,9 +1002,7 @@ class analyze_cells:
 
             return Ellipse(centre, width, height, np.degrees(theta), **kwargs)
 
-        # TODO: Modify after feature attribute is converted to DataFrame
-        df = pd.DataFrame(self.features, columns=all_features)
-        subset_features = df[on_features].to_numpy()
+        subset_features = self.features[on_features].to_numpy()
 
         pca_object = decomposition.PCA(n_PC)
 
@@ -1058,21 +1057,25 @@ class analyze_cells:
 
     def plot_feature_histograms(self):
         # 2 columns each containing 13 figures, total 22 features
-        fig, axes = plt.subplots(12, 2, figsize=(15, 12))
-        data = np.array(self.features)
+        n_PCA_features = len(self.pca_feature_names)
+        fig, axes = plt.subplots((n_PCA_features+1)//2, 2, figsize=(15, 12))
+        data = self.features[self.pca_feature_names].to_numpy()
         ko = data[np.where(np.array(self.targets) == 0)[0]]  # define ko
         control = data[np.where(np.array(self.targets) == 1)[
             0]]  # define control
         ax = axes.ravel()  # flat axes with numpy ravel
 
-        for i in range(len(self.feature_names)):
+        feature_names = self.pca_feature_names
+
+        for i in range(len(feature_names)):
             _, bins = np.histogram(data[:, i], bins=40)
             # red color for malignant class
             ax[i].hist(ko[:, i], bins=bins, color='r', alpha=.5)
             # alpha is for transparency in the overlapped region
             ax[i].hist(control[:, i], bins=bins, color='g', alpha=0.3)
-            ax[i].set_title(self.feature_names[i], fontsize=9)
-            # the x-axis co-ordinates are not so useful, as we just want to look how well separated the histograms are
+            ax[i].set_title(feature_names[i], fontsize=9)
+            # the x-axis co-ordinates are not so useful, as we just want to
+            # look how well separated the histograms are
             ax[i].axes.get_xaxis().set_visible(False)
             ax[i].set_yticks(())
 
@@ -1106,7 +1109,7 @@ class analyze_cells:
     def plot_feature_significance_vectors(self):
         score = self.projected
         coeff = np.transpose(self.feature_significance)
-        labels = self.feature_names
+        labels = self.pca_feature_names
         xs = score[:, 0]
         ys = score[:, 1]
         n = coeff.shape[0]
@@ -1154,7 +1157,7 @@ class analyze_cells:
             A DataFrame with normalized cell coordinates & the respective
             cluster to which they belong.
         """
-        n_cells = len(self.features)
+        n_cells = self.features.shape[0]
         seed = np.random.randint(0, n_cells)  # for deterministic randomness
 
         if k != None and (k < 2 or k > n_cells):
@@ -1186,7 +1189,7 @@ class analyze_cells:
         if use_features:
             if n_PC == None:
                 scaler = preprocessing.MaxAbsScaler()
-                features = self.features
+                features = self.features.to_numpy()
                 df = pd.DataFrame(scaler.fit(features).transform(features))
             else:
                 raise ValueError('Cannot use morphological features & n_PC '
