@@ -7,6 +7,7 @@ import scipy
 import numpy as np
 import pandas as pd
 import seaborn as sns
+import pickle
 
 from collections import defaultdict
 from itertools import cycle, islice
@@ -160,14 +161,12 @@ class Cell:
     def label_objects(self):
         bw = closing(self.inverted_thresholded_image, square(1))
         # label image regions
-        labelled_image, no_of_objects = skimage.measure.label(
-            bw, return_num=True)
+        labelled_image = skimage.measure.label(bw, return_num=True)[0]
 
-        return labelled_image, no_of_objects
+        return labelled_image
 
     def remove_small_object_noise(self):
-        labelled_image, no_of_objects = self.label_objects()
-        # TODO: decide removal of unused variable
+        labelled_image = self.label_objects()
         labelled_image_1D = labelled_image.reshape(labelled_image.size)
         object_areas = np.bincount(labelled_image_1D[labelled_image_1D != 0])
 
@@ -253,7 +252,7 @@ class Skeleton:
     def convex_hull(self, plot=False):
         convex_hull = skimage.morphology.convex_hull_image(self.cell_skeleton)
         if plot == True:
-            fig, ax = plt.subplots()
+            ax = plt.subplots()[1]
             ax.set_axis_off()
             ax.imshow(convex_hull)
 
@@ -262,18 +261,17 @@ class Skeleton:
     def get_no_of_forks(self, plot=False):
 
         # get the degree for every cell pixel (no. of neighbouring pixels)
-        pixel_graph, coordinates, degrees = skeleton_to_csgraph(
-            self.cell_skeleton)
+        degrees = skeleton_to_csgraph(self.cell_skeleton)[2]
         # array of all pixel locations with degree more than 2
         fork_image = np.where(degrees > [2], 1, 0)
         s = scipy.ndimage.generate_binary_structure(2, 2)
-        labeled_array, num_forks = scipy.ndimage.label(fork_image, structure=s)
+        num_forks = scipy.ndimage.label(fork_image, structure=s)[1]
 
         if plot == True:
             fork_indices = np.where(degrees > [2])
             fork_coordinates = zip(fork_indices[0], fork_indices[1])
 
-            fig, ax = plt.subplots(figsize=(4, 4))
+            ax = plt.subplots(figsize=(4, 4))[1]
             ax.set_title('path')
             ax.imshow(self.cell_skeleton, interpolation='nearest')
 
@@ -388,8 +386,7 @@ class Skeleton:
                     soma_branches.append(path)
             return soma_branches
 
-        pixel_graph, coordinates, degrees = skeleton_to_csgraph(
-            self.cell_skeleton)
+        pixel_graph, coordinates = skeleton_to_csgraph(self.cell_skeleton)[0:2]
         branch_statistics = skan.csr.branch_statistics(pixel_graph)
         paths_list = skan.csr.Skeleton(self.cell_skeleton).paths_list()
 
@@ -434,7 +431,7 @@ class Skeleton:
                         single_branch_level.extend(path_coords)
                 color_branches_coords.append(single_branch_level)
 
-            fig, ax = plt.subplots(figsize=(4, 4))
+            ax = plt.subplots(figsize=(4, 4))[1]
             ax.set_title('path')
             ax.imshow(self.cell_skeleton, interpolation='nearest')
 
@@ -561,9 +558,9 @@ class Sholl:
             for index in indexes:
                 intersec_indicies.append(concentric_coordinates[radius][index])
             img = np.zeros(self.padded_skeleton.shape)
-            intersections = []
-            for i, j in enumerate(intersec_indicies):
-                img[j] = 1
+
+            for index in intersec_indicies:
+                img[index] = 1
             label_image = label(img)
             no_of_intersections[radius] = np.amax(label_image)
 
@@ -580,13 +577,13 @@ class Sholl:
 
         if plot == True:
             astrocyte_skeleton_copy = copy.deepcopy(self.padded_skeleton)
-            for radius, coordinates in concentric_coordinates.items():
+            for coordinates in concentric_coordinates.values():
                 for coord in coordinates:
                     cell_image_with_circles = astrocyte_skeleton_copy
                     cell_image_with_circles[coord[0], coord[1]] = 1
 
             # plot circles on skeleton
-            fig, ax = plt.subplots(figsize=(10, 6))
+            ax = plt.subplots(figsize=(10, 6))[1]
             ax.imshow(cell_image_with_circles)
             # overlay soma on skeleton
             y, x = self.soma_on_padded_skeleton
@@ -751,12 +748,13 @@ class analyze_cells:
         self.shell_step_size = shell_step_size
 
         dataset = self.read_images(groups_folders)
-        self.features = self.get_features(dataset)
         self.feature_names = ['surface_area', 'total_length', 'avg_process_thickness', 'convex_hull', 'no_of_forks', 'no_of_primary_branches', 'no_of_secondary_branches',
                               'no_of_tertiary_branches', 'no_of_quatenary_branches', 'no_of_terminal_branches', 'avg_length_of_primary_branches', 'avg_length_of_secondary_branches',
                               'avg_length_of_tertiary_branches', 'avg_length_of_quatenary_branches', 'avg_length_of_terminal_branches',
                               'critical_radius', 'critical_value', 'enclosing_radius', 'ramification_index', 'skewness', 'coefficient_of_determination',
                               'sholl_regression_coefficient', 'regression_intercept']
+        self.features = self.get_features(dataset)
+        self.pca_feature_names = None
         if save_features == True:
             self.save_features()
         if show_sholl_plot == True:
@@ -789,7 +787,7 @@ class analyze_cells:
         cell_count = 0
         for group_no, group in enumerate(dataset):
             group_cell_count = 0
-            for cell_no, cell_image in enumerate(group):
+            for cell_image in group:
 
                 print(self.file_names[cell_count])
 
@@ -835,67 +833,53 @@ class analyze_cells:
                 dataset_features.append(cell_features)
 
             self.group_counts.append(group_cell_count)
-        return dataset_features
+        return pd.DataFrame(dataset_features, columns=self.feature_names)
 
     def save_features(self):
-        directory = os.getcwd()+'/Features'
-        if os.path.exists(directory) and os.path.isdir(directory):
-            shutil.rmtree(directory)
-            os.mkdir(directory)
-        else:
-            os.mkdir(directory)
+        DIR = os.getcwd()+'/Features/'
+        FILENAME = 'features.csv'
+        if os.path.exists(DIR) and os.path.isdir(DIR):
+            shutil.rmtree(DIR)
+        os.mkdir(DIR)
 
-        def save_to_file(file_name, feature_name, feature_value):
-            path = os.getcwd()+'/Features/'
-            with open(path+feature_name+'.txt', 'a') as text_file:
-                text_file.write("{} {} \n".format(file_name, feature_value))
-
-        for cell_no, cell_features in enumerate(self.features):
-            for feature_no, feature_val in enumerate(cell_features):
-                save_to_file(
-                    self.file_names[cell_no], self.feature_names[feature_no], feature_val)
+        export_data = self.features.copy()
+        export_data.insert(0, 'cell_image_file', self.file_names)
+        export_data.to_csv(DIR + FILENAME, index=False, mode='w')
 
     def show_avg_sholl_plot(self, shell_step_size):
-        original_plots_file = 'Original plots'
-        polynomial_plots_file = 'Polynomial plots'
+        OUTFILE = 'sholl_results.pickle'
+        ANALYSES = ['single_cell_intersections', 'group_cells_intersections']
+        SINGLE_CELL_INTERSECTIONS = ['original_plot', 'polynomial_plot']
 
-        directory = os.getcwd()+'/Sholl Results'
+        DIR = os.getcwd() + '/Sholl Results/'
 
-        if os.path.exists(directory) and os.path.isdir(directory):
-            shutil.rmtree(directory)
-            os.mkdir(directory)
-        else:
-            os.mkdir(directory)
-
-        path = os.getcwd()+'/Sholl Results/'
+        if os.path.exists(DIR) and os.path.isdir(DIR):
+            shutil.rmtree(DIR)
+        os.mkdir(DIR)
 
         largest_radius = []
         no_of_intersections = []
+        write_buffer = {ANALYSES[0]: {}, ANALYSES[1]: {}}
+        file_names = self.file_names
+        original_plots = self.sholl_original_plots
+        polynomial_plots = self.sholl_polynomial_plots
+        group_counts = self.group_counts
+        label = self.label
 
-        with open(path+original_plots_file, 'w+') as text_file:
-            for cell_no, plot in enumerate(self.sholl_original_plots):
-                text_file.write("{} {} {} \n".format(
-                    self.file_names[cell_no], plot[0], plot[1]))
+        for index in range(len(file_names)):
+            write_buffer[ANALYSES[0]][file_names[index]] = {
+                SINGLE_CELL_INTERSECTIONS[0]: original_plots[index],
+                SINGLE_CELL_INTERSECTIONS[1]: polynomial_plots[index]}
 
-                # # get the max radius of each cell, as smallest and mid-level ones can be inferred from shell_step_size
-                # largest_radius.append(max(plot[0]))
-                # no_of_intersections.append(plot[1])
+            # get the max radius of each cell, as smallest and
+            # mid-level ones can be inferred from shell_step_size
+            largest_radius.append(max(polynomial_plots[index][0]))
+            no_of_intersections.append(polynomial_plots[index][1])
 
-        with open(path+polynomial_plots_file, 'w+') as text_file:
-            for cell_no, plot in enumerate(self.sholl_polynomial_plots):
-                text_file.write("{} {} {} \n".format(
-                    self.file_names[cell_no], plot[0], plot[1]))
 
-                # get the max radius of each cell, as smallest and mid-level ones can be inferred from shell_step_size
-                largest_radius.append(max(plot[0]))
-                no_of_intersections.append(plot[1])
-
-        group_radiuses = []
-        sholl_intersections = []
-        for group_no, count in enumerate(self.group_counts):
-            group_count = sum(self.group_counts[:group_no+1])
+        for group_no, count in enumerate(group_counts):
+            group_count = sum(group_counts[:group_no+1])
             group_radius = max(largest_radius[group_count-count:group_count])
-            group_radiuses.append(group_radius)
 
             current_intersections = no_of_intersections[group_count -
                                                         count:group_count]
@@ -907,37 +891,71 @@ class analyze_cells:
                 for i, intersection_val in enumerate(intersections):
                     intersection_dict[current_radiuses[i]].append(
                         intersection_val)
-            sholl_intersections.append(intersection_dict)
+            write_buffer[ANALYSES[1]][group_no] = intersection_dict
 
-        with open(path+"Sholl values", 'w') as text_file:
-            for group_no, group_sholl in enumerate(sholl_intersections):
-                text_file.write("Group: {}\n".format(group_no))
-                for radius, intersections in group_sholl.items():
-                    text_file.write("{} {}\n".format(radius, intersections))
+        with open(DIR+OUTFILE, 'wb') as file:
+            pickle.dump(write_buffer, file, -1)
 
-        for group_no, group_sholl in enumerate(sholl_intersections):
-            x = []
-            y = []
-            e = []
+        for group_no, group_sholl in write_buffer[ANALYSES[1]].items():
+            x, y, e = [], [], []
             for radius, intersections in group_sholl.items():
                 x.append(radius)
-                intersections = (
-                    intersections + self.group_counts[group_no] * [0])[:self.group_counts[group_no]]
+                intersections += group_counts[group_no] * [0]
+                intersections = intersections[:group_counts[group_no]]
                 y.append(np.mean(intersections))
                 e.append(scipy.stats.sem(intersections))
-            plt.errorbar(x, y, yerr=e, label=self.label[group_no])
+            plt.errorbar(x, y, yerr=e, label=label[group_no])
 
         plt.xlabel("Distance from soma")
         plt.ylabel("No. of intersections")
         plt.legend()
         plt.show()
 
-    def pca(self, n_PC, color_dict, marker):
+    def pca(self, n_PC, color_dict, marker, on_features=None):
+        """Principal Component Analysis of morphological features of cells.
 
-        if n_PC < 2 or n_PC > len(self.features):
+        Parameters
+        ----------
+        n_PC : int
+            If greater than 1, return n_PC number of Principal Components after
+            clustering. If None & use_features is False, it's autoselected as
+            number of Principal Components calculated.
+        color_dict : dict
+            Dict with color to be used for each group.
+        marker : dict
+            Dict with marker for each group to be used in PCA plot.
+        on_features : list, optional
+            List of names of morphological features from which Principal
+            Components will be derived, by default None.
+            If None, all 23 morphological features will be used.
+
+        Returns
+        -------
+        var_PCs : ndarray
+            Captured variance ratios of each Principal Component.
+
+        Raises
+        ------
+        ValueError
+            * If n_PC isn't greater than 1 & less than the total number of
+            morphological features of cells.
+            * If element(s) of on_features is/are not in list of all
+            morphological features.
+
+        """
+        all_features = self.feature_names
+
+        if n_PC < 2 or n_PC >= len(all_features):
             raise ValueError('Principal Components must be greater than 1 & '
                              'less than number of morphological features.')
 
+        if on_features == None:
+            on_features = all_features
+        elif not all(feature in all_features for feature in set(on_features)):
+            raise ValueError('Selected Principal Components are not a subset '
+                             'of the original set of morphological features.')
+
+        self.pca_feature_names = on_features
         self.marker = marker
 
         def get_cov_ellipse(cov, centre, nstd, **kwargs):
@@ -959,14 +977,16 @@ class analyze_cells:
             # Width and height of ellipse to draw
             width, height = nstd * np.sqrt(eigvals)
 
-            return Ellipse(xy=centre, width=width, height=height, angle=np.degrees(theta), **kwargs)
+            return Ellipse(centre, width, height, np.degrees(theta), **kwargs)
+
+        subset_features = self.features[on_features].to_numpy()
 
         pca_object = decomposition.PCA(n_PC)
 
         # Scale data
         scaler = preprocessing.MaxAbsScaler()
-        scaler.fit(self.features)
-        X = scaler.transform(self.features)
+        scaler.fit(subset_features)
+        X = scaler.transform(subset_features)
 
         # fit on data
         pca_object.fit(X)
@@ -975,57 +995,63 @@ class analyze_cells:
         self.feature_significance = pca_object.components_
 
         # variance captured by principal components
-        first_component_var = pca_object.explained_variance_ratio_[0]
-        second_component_var = pca_object.explained_variance_ratio_[1]
+        var_PCs = pca_object.explained_variance_ratio_
 
         # transform data
         self.projected = pca_object.transform(X)
 
-        first_component = self.projected[:, 0]
-        second_component = self.projected[:, 1]
+        PC_1 = self.projected[:, 0]
+        PC_2 = self.projected[:, 1]
 
-        with open("pca values", 'w') as text_file:
-            text_file.write("First component:\n{}\nSecond component:\n{}".format(
-                first_component, second_component))
+        PC_COLUMN_NAMES = [f'PC {i + 1}' for i in range(n_PC)]
+        pca_values = pd.DataFrame(data=self.projected, columns=PC_COLUMN_NAMES)
 
-        no_of_std = 3  # no. of standard deviations to show
-        fig, ax = plt.subplots()
-        fig.patch.set_facecolor('white')
-        for l in np.unique(self.targets):
-            ix = np.where(self.targets == l)
-            first_component_mean = np.mean(first_component[ix])
-            second_component_mean = np.mean(second_component[ix])
-            cov = np.cov(first_component, second_component)
-            ax.scatter(first_component[ix], second_component[ix],
-                       c=color_dict[l], s=40, label=self.label[l], marker=marker[l])
-            e = get_cov_ellipse(
-                cov, (first_component_mean, second_component_mean), no_of_std, fc=color_dict[l], alpha=0.4)
-            ax.add_artist(e)
+        pca_values.to_csv('pca values.csv', index=False)
 
-        plt.xlabel("PC 1 (Variance: %.1f%%)" %
-                   (first_component_var*100), fontsize=14)
-        plt.ylabel("PC 2 (Variance: %.1f%%)" %
-                   (second_component_var*100), fontsize=14)
-        plt.legend()
-        plt.show()
+        def visualize_two_PCs():
+            n_std = 3  # no. of standard deviations to show
+            fig, ax = plt.subplots()
+            fig.patch.set_facecolor('white')
+            for l in np.unique(self.targets):
+                ix = np.where(self.targets == l)
+                mean_PC_1 = np.mean(PC_1[ix])
+                mean_PC_2 = np.mean(PC_2[ix])
+                cov = np.cov(PC_1, PC_2)
+                ax.scatter(PC_1[ix], PC_2[ix], c=color_dict[l], s=40,
+                           label=self.label[l], marker=marker[l])
+                e = get_cov_ellipse(cov, (mean_PC_1, mean_PC_2),
+                                    n_std, fc=color_dict[l], alpha=0.4)
+                ax.add_artist(e)
+
+            plt.xlabel(f'PC 1 (Variance: {var_PCs[0]*100:.1f})', fontsize=14)
+            plt.ylabel(f'PC 2 (Variance: {var_PCs[1]*100:.1f})', fontsize=14)
+            plt.legend()
+            plt.show()
+
+        visualize_two_PCs()
+
+        return var_PCs
 
     def plot_feature_histograms(self):
-        # 2 columns each containing 13 figures, total 22 features
-        fig, axes = plt.subplots(12, 2, figsize=(15, 12))
-        data = np.array(self.features)
-        ko = data[np.where(np.array(self.targets) == 0)[0]]  # define ko
-        control = data[np.where(np.array(self.targets) == 1)[
-            0]]  # define control
+        pca_feature_names = self.pca_feature_names
+        n_PCA_features = len(pca_feature_names)
+
+        axes = plt.subplots((n_PCA_features+1)//2, 2, figsize=(15, 12))[1]
+        data = self.features[pca_feature_names].to_numpy()
+
+        ko = data[np.where(np.array(self.targets) == 0)[0]]
+        control = data[np.where(np.array(self.targets) == 1)[0]]
         ax = axes.ravel()  # flat axes with numpy ravel
 
-        for i in range(len(self.feature_names)):
-            _, bins = np.histogram(data[:, i], bins=40)
+        for i in range(len(pca_feature_names)):
+            bins = np.histogram(data[:, i], bins=40)[1]
             # red color for malignant class
             ax[i].hist(ko[:, i], bins=bins, color='r', alpha=.5)
             # alpha is for transparency in the overlapped region
             ax[i].hist(control[:, i], bins=bins, color='g', alpha=0.3)
-            ax[i].set_title(self.feature_names[i], fontsize=9)
-            # the x-axis co-ordinates are not so useful, as we just want to look how well separated the histograms are
+            ax[i].set_title(pca_feature_names[i], fontsize=9)
+            # x-axis co-ordinates aren't so useful, as we just want to
+            # look how well separated the histograms are
             ax[i].axes.get_xaxis().set_visible(False)
             ax[i].set_yticks(())
 
@@ -1034,19 +1060,24 @@ class analyze_cells:
         plt.show()
 
     def plot_feature_significance_heatmap(self):
-        sorted_significance_order = np.flip(
-            np.argsort(abs(self.feature_significance[0])))
+        n_PC = self.feature_significance.shape[0]
+        sorted_significance_order = np.argsort(self.feature_significance[0])
         sorted_feature_significance = np.zeros(self.feature_significance.shape)
-        sorted_feature_significance[0] = np.array(self.feature_significance[0])[
-            sorted_significance_order]
-        sorted_feature_significance[1] = np.array(self.feature_significance[1])[
-            sorted_significance_order]
-        sorted_feature_names = np.array(self.feature_names)[
+
+        def order_by_PC_1_significance(significance):
+            out = np.array(significance)[sorted_significance_order]
+            return out
+
+        sorted_feature_significance = list(map(
+            order_by_PC_1_significance, self.feature_significance))
+
+        sorted_feature_names = np.array(self.pca_feature_names)[
             sorted_significance_order]
 
         plt.matshow(np.array(sorted_feature_significance), cmap='gist_heat')
-        plt.yticks([0, 1], ['1st Comp', '2nd Comp'], fontsize=10)
-        plt.colorbar()
+        plt.yticks(list(range(n_PC)), [
+                   f'PC {i+1}' for i in range(n_PC)], fontsize=10)
+        plt.colorbar(orientation='horizontal')
         plt.xticks(range(len(sorted_feature_names)),
                    sorted_feature_names, rotation=65, ha='left')
         plt.show()
@@ -1054,7 +1085,7 @@ class analyze_cells:
     def plot_feature_significance_vectors(self):
         score = self.projected
         coeff = np.transpose(self.feature_significance)
-        labels = self.feature_names
+        labels = self.pca_feature_names
         xs = score[:, 0]
         ys = score[:, 1]
         n = coeff.shape[0]
@@ -1102,13 +1133,15 @@ class analyze_cells:
             A DataFrame with normalized cell coordinates & the respective
             cluster to which they belong.
         """
-        n_cells = len(self.features)
+        all_features = self.features
+        group_counts = self.group_counts
+        n_cells = all_features.shape[0]
         seed = np.random.randint(0, n_cells)  # for deterministic randomness
 
         if k != None and (k < 2 or k > n_cells):
             raise ValueError('Number of clusters, k, must be greater than 1 & '
                              'lesser than the total number of cells.')
-        
+
         if plot not in [None, 'parallel', 'scatter']:
             raise ValueError('Plot must be either of parallel or scatter.')
 
@@ -1134,7 +1167,7 @@ class analyze_cells:
         if use_features:
             if n_PC == None:
                 scaler = preprocessing.MaxAbsScaler()
-                features = self.features
+                features = all_features.to_numpy()
                 df = pd.DataFrame(scaler.fit(features).transform(features))
             else:
                 raise ValueError('Cannot use morphological features & n_PC '
@@ -1156,7 +1189,7 @@ class analyze_cells:
                 raise ValueError('Number of Principal Components, n_PC, should be '
                                  'greater than 1 & less than or equal to the total '
                                  'number of Principal Components of cells.')
-        
+
         if n_PC not in [2, 3] and plot == 'scatter':
             raise ValueError('Scatter plot can only be in 2D or 3D.')
 
@@ -1187,7 +1220,7 @@ class analyze_cells:
                 plt.scatter(centers[:, 0], centers[:, 1],
                             45, LABEL_COLOR_MAP, 'd')
 
-                for cells in self.group_counts:
+                for cells in group_counts:
                     r_idx += cells
                     plt.scatter(data[l_idx:r_idx, 0], data[l_idx:r_idx, 1], 40,
                                 label_color[l_idx:r_idx], next(MARKERS))
@@ -1203,7 +1236,7 @@ class analyze_cells:
                 ipv.scatter(centers[:, 0], centers[:, 1], centers[:, 2],
                             LABEL_COLOR_MAP, 5, 5.6, marker='diamond')
 
-                for cells in self.group_counts:
+                for cells in group_counts:
                     r_idx += cells
                     ipv.scatter(data[l_idx:r_idx, 0], data[l_idx:r_idx, 1],
                                 data[l_idx:r_idx, 2], label_color[l_idx:r_idx],
@@ -1213,13 +1246,12 @@ class analyze_cells:
                 ipv.xyzlabel('PC1', 'PC2', 'PC3')
                 ipv.show()
 
-
         if plot != None:
             if plot == 'parallel':
                 parallel_plot(centers_df)
             elif plot == 'scatter':
                 scatter_plot(normalized_feature_vector,
-                            kmeans_model.cluster_centers_)
+                             kmeans_model.cluster_centers_)
 
         print(f'k = {k} clusters with Variance Ratio = {variance_ratio}')
         print(f'seed = {seed}')
