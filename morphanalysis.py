@@ -161,14 +161,12 @@ class Cell:
     def label_objects(self):
         bw = closing(self.inverted_thresholded_image, square(1))
         # label image regions
-        labelled_image, no_of_objects = skimage.measure.label(
-            bw, return_num=True)
+        labelled_image = skimage.measure.label(bw, return_num=True)[0]
 
-        return labelled_image, no_of_objects
+        return labelled_image
 
     def remove_small_object_noise(self):
-        labelled_image, no_of_objects = self.label_objects()
-        # TODO: decide removal of unused variable
+        labelled_image = self.label_objects()
         labelled_image_1D = labelled_image.reshape(labelled_image.size)
         object_areas = np.bincount(labelled_image_1D[labelled_image_1D != 0])
 
@@ -254,7 +252,7 @@ class Skeleton:
     def convex_hull(self, plot=False):
         convex_hull = skimage.morphology.convex_hull_image(self.cell_skeleton)
         if plot == True:
-            fig, ax = plt.subplots()
+            ax = plt.subplots()[1]
             ax.set_axis_off()
             ax.imshow(convex_hull)
 
@@ -263,18 +261,17 @@ class Skeleton:
     def get_no_of_forks(self, plot=False):
 
         # get the degree for every cell pixel (no. of neighbouring pixels)
-        pixel_graph, coordinates, degrees = skeleton_to_csgraph(
-            self.cell_skeleton)
+        degrees = skeleton_to_csgraph(self.cell_skeleton)[2]
         # array of all pixel locations with degree more than 2
         fork_image = np.where(degrees > [2], 1, 0)
         s = scipy.ndimage.generate_binary_structure(2, 2)
-        labeled_array, num_forks = scipy.ndimage.label(fork_image, structure=s)
+        num_forks = scipy.ndimage.label(fork_image, structure=s)[1]
 
         if plot == True:
             fork_indices = np.where(degrees > [2])
             fork_coordinates = zip(fork_indices[0], fork_indices[1])
 
-            fig, ax = plt.subplots(figsize=(4, 4))
+            ax = plt.subplots(figsize=(4, 4))[1]
             ax.set_title('path')
             ax.imshow(self.cell_skeleton, interpolation='nearest')
 
@@ -389,8 +386,7 @@ class Skeleton:
                     soma_branches.append(path)
             return soma_branches
 
-        pixel_graph, coordinates, degrees = skeleton_to_csgraph(
-            self.cell_skeleton)
+        pixel_graph, coordinates = skeleton_to_csgraph(self.cell_skeleton)[0:2]
         branch_statistics = skan.csr.branch_statistics(pixel_graph)
         paths_list = skan.csr.Skeleton(self.cell_skeleton).paths_list()
 
@@ -435,7 +431,7 @@ class Skeleton:
                         single_branch_level.extend(path_coords)
                 color_branches_coords.append(single_branch_level)
 
-            fig, ax = plt.subplots(figsize=(4, 4))
+            ax = plt.subplots(figsize=(4, 4))[1]
             ax.set_title('path')
             ax.imshow(self.cell_skeleton, interpolation='nearest')
 
@@ -562,9 +558,9 @@ class Sholl:
             for index in indexes:
                 intersec_indicies.append(concentric_coordinates[radius][index])
             img = np.zeros(self.padded_skeleton.shape)
-            intersections = []
-            for i, j in enumerate(intersec_indicies):
-                img[j] = 1
+
+            for index in intersec_indicies:
+                img[index] = 1
             label_image = label(img)
             no_of_intersections[radius] = np.amax(label_image)
 
@@ -581,13 +577,13 @@ class Sholl:
 
         if plot == True:
             astrocyte_skeleton_copy = copy.deepcopy(self.padded_skeleton)
-            for radius, coordinates in concentric_coordinates.items():
+            for coordinates in concentric_coordinates.values():
                 for coord in coordinates:
                     cell_image_with_circles = astrocyte_skeleton_copy
                     cell_image_with_circles[coord[0], coord[1]] = 1
 
             # plot circles on skeleton
-            fig, ax = plt.subplots(figsize=(10, 6))
+            ax = plt.subplots(figsize=(10, 6))[1]
             ax.imshow(cell_image_with_circles)
             # overlay soma on skeleton
             y, x = self.soma_on_padded_skeleton
@@ -791,7 +787,7 @@ class analyze_cells:
         cell_count = 0
         for group_no, group in enumerate(dataset):
             group_cell_count = 0
-            for cell_no, cell_image in enumerate(group):
+            for cell_image in group:
 
                 print(self.file_names[cell_count])
 
@@ -1037,25 +1033,24 @@ class analyze_cells:
         return var_PCs
 
     def plot_feature_histograms(self):
-        # 2 columns each containing 13 figures, total 22 features
-        n_PCA_features = len(self.pca_feature_names)
-        fig, axes = plt.subplots((n_PCA_features+1)//2, 2, figsize=(15, 12))
-        data = self.features[self.pca_feature_names].to_numpy()
-        ko = data[np.where(np.array(self.targets) == 0)[0]]  # define ko
-        control = data[np.where(np.array(self.targets) == 1)[
-            0]]  # define control
+        pca_feature_names = self.pca_feature_names
+        n_PCA_features = len(pca_feature_names)
+
+        axes = plt.subplots((n_PCA_features+1)//2, 2, figsize=(15, 12))[1]
+        data = self.features[pca_feature_names].to_numpy()
+
+        ko = data[np.where(np.array(self.targets) == 0)[0]]
+        control = data[np.where(np.array(self.targets) == 1)[0]]
         ax = axes.ravel()  # flat axes with numpy ravel
 
-        feature_names = self.pca_feature_names
-
-        for i in range(len(feature_names)):
-            _, bins = np.histogram(data[:, i], bins=40)
+        for i in range(len(pca_feature_names)):
+            bins = np.histogram(data[:, i], bins=40)[1]
             # red color for malignant class
             ax[i].hist(ko[:, i], bins=bins, color='r', alpha=.5)
             # alpha is for transparency in the overlapped region
             ax[i].hist(control[:, i], bins=bins, color='g', alpha=0.3)
-            ax[i].set_title(feature_names[i], fontsize=9)
-            # the x-axis co-ordinates are not so useful, as we just want to
+            ax[i].set_title(pca_feature_names[i], fontsize=9)
+            # x-axis co-ordinates aren't so useful, as we just want to
             # look how well separated the histograms are
             ax[i].axes.get_xaxis().set_visible(False)
             ax[i].set_yticks(())
@@ -1138,7 +1133,9 @@ class analyze_cells:
             A DataFrame with normalized cell coordinates & the respective
             cluster to which they belong.
         """
-        n_cells = self.features.shape[0]
+        all_features = self.features
+        group_counts = self.group_counts
+        n_cells = all_features.shape[0]
         seed = np.random.randint(0, n_cells)  # for deterministic randomness
 
         if k != None and (k < 2 or k > n_cells):
@@ -1170,7 +1167,7 @@ class analyze_cells:
         if use_features:
             if n_PC == None:
                 scaler = preprocessing.MaxAbsScaler()
-                features = self.features.to_numpy()
+                features = all_features.to_numpy()
                 df = pd.DataFrame(scaler.fit(features).transform(features))
             else:
                 raise ValueError('Cannot use morphological features & n_PC '
@@ -1223,7 +1220,7 @@ class analyze_cells:
                 plt.scatter(centers[:, 0], centers[:, 1],
                             45, LABEL_COLOR_MAP, 'd')
 
-                for cells in self.group_counts:
+                for cells in group_counts:
                     r_idx += cells
                     plt.scatter(data[l_idx:r_idx, 0], data[l_idx:r_idx, 1], 40,
                                 label_color[l_idx:r_idx], next(MARKERS))
@@ -1239,7 +1236,7 @@ class analyze_cells:
                 ipv.scatter(centers[:, 0], centers[:, 1], centers[:, 2],
                             LABEL_COLOR_MAP, 5, 5.6, marker='diamond')
 
-                for cells in self.group_counts:
+                for cells in group_counts:
                     r_idx += cells
                     ipv.scatter(data[l_idx:r_idx, 0], data[l_idx:r_idx, 1],
                                 data[l_idx:r_idx, 2], label_color[l_idx:r_idx],
