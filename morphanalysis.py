@@ -7,6 +7,7 @@ import scipy
 import numpy as np
 import pandas as pd
 import seaborn as sns
+import pickle
 
 from collections import defaultdict
 from itertools import cycle, islice
@@ -843,48 +844,42 @@ class analyze_cells:
         FILENAME = 'features.csv'
         if os.path.exists(DIR) and os.path.isdir(DIR):
             shutil.rmtree(DIR)
-            os.mkdir(DIR)
-        else:
-            os.mkdir(DIR)
+        os.mkdir(DIR)
 
         export_data = self.features.copy()
         export_data.insert(0, 'cell_image_file', self.file_names)
         export_data.to_csv(DIR + FILENAME, index=False, mode='w')
 
     def show_avg_sholl_plot(self, shell_step_size):
-        original_plots_file = 'Original plots'
-        polynomial_plots_file = 'Polynomial plots'
+        OUTFILE = 'sholl_results.pickle'
+        DATA = ['original_plot', 'polynomial_plot']
 
-        directory = os.getcwd()+'/Sholl Results'
+        DIR = os.getcwd()+'/Sholl Results/'
 
-        if os.path.exists(directory) and os.path.isdir(directory):
-            shutil.rmtree(directory)
-            os.mkdir(directory)
-        else:
-            os.mkdir(directory)
-
-        path = os.getcwd()+'/Sholl Results/'
+        if os.path.exists(DIR) and os.path.isdir(DIR):
+            shutil.rmtree(DIR)
+        os.mkdir(DIR)
 
         largest_radius = []
         no_of_intersections = []
+        write_buffer = {}
+        file_names = self.file_names
+        original_plots = self.sholl_original_plots
+        polynomial_plots = self.sholl_polynomial_plots
 
-        with open(path+original_plots_file, 'w+') as text_file:
-            for cell_no, plot in enumerate(self.sholl_original_plots):
-                text_file.write("{} {} {} \n".format(
-                    self.file_names[cell_no], plot[0], plot[1]))
+        for index in range(len(file_names)):
+            write_buffer[file_names[index]] = {
+                DATA[0]: original_plots[index],
+                DATA[1]: polynomial_plots[index]}
 
-                # # get the max radius of each cell, as smallest and mid-level ones can be inferred from shell_step_size
-                # largest_radius.append(max(plot[0]))
-                # no_of_intersections.append(plot[1])
+            # get the max radius of each cell, as smallest and
+            # mid-level ones can be inferred from shell_step_size
+            largest_radius.append(max(polynomial_plots[index][0]))
+            no_of_intersections.append(polynomial_plots[index][1])
 
-        with open(path+polynomial_plots_file, 'w+') as text_file:
-            for cell_no, plot in enumerate(self.sholl_polynomial_plots):
-                text_file.write("{} {} {} \n".format(
-                    self.file_names[cell_no], plot[0], plot[1]))
-
-                # get the max radius of each cell, as smallest and mid-level ones can be inferred from shell_step_size
-                largest_radius.append(max(plot[0]))
-                no_of_intersections.append(plot[1])
+        with open(DIR+OUTFILE, 'wb') as file:
+            pickler = pickle.Pickler(file, -1)
+            pickler.dump(write_buffer)
 
         group_radiuses = []
         sholl_intersections = []
@@ -905,7 +900,7 @@ class analyze_cells:
                         intersection_val)
             sholl_intersections.append(intersection_dict)
 
-        with open(path+"Sholl values", 'w') as text_file:
+        with open(DIR+"Sholl values", 'w') as text_file:
             for group_no, group_sholl in enumerate(sholl_intersections):
                 text_file.write("Group: {}\n".format(group_no))
                 for radius, intersections in group_sholl.items():
