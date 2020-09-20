@@ -852,9 +852,10 @@ class analyze_cells:
 
     def show_avg_sholl_plot(self, shell_step_size):
         OUTFILE = 'sholl_results.pickle'
-        DATA = ['original_plot', 'polynomial_plot']
+        ANALYSES = ['single_cell_intersections', 'group_cells_intersections']
+        SINGLE_CELL_INTERSECTIONS = ['original_plot', 'polynomial_plot']
 
-        DIR = os.getcwd()+'/Sholl Results/'
+        DIR = os.getcwd() + '/Sholl Results/'
 
         if os.path.exists(DIR) and os.path.isdir(DIR):
             shutil.rmtree(DIR)
@@ -862,31 +863,27 @@ class analyze_cells:
 
         largest_radius = []
         no_of_intersections = []
-        write_buffer = {}
+        write_buffer = {ANALYSES[0]: {}, ANALYSES[1]: {}}
         file_names = self.file_names
         original_plots = self.sholl_original_plots
         polynomial_plots = self.sholl_polynomial_plots
+        group_counts = self.group_counts
+        label = self.label
 
         for index in range(len(file_names)):
-            write_buffer[file_names[index]] = {
-                DATA[0]: original_plots[index],
-                DATA[1]: polynomial_plots[index]}
+            write_buffer[ANALYSES[0]][file_names[index]] = {
+                SINGLE_CELL_INTERSECTIONS[0]: original_plots[index],
+                SINGLE_CELL_INTERSECTIONS[1]: polynomial_plots[index]}
 
             # get the max radius of each cell, as smallest and
             # mid-level ones can be inferred from shell_step_size
             largest_radius.append(max(polynomial_plots[index][0]))
             no_of_intersections.append(polynomial_plots[index][1])
 
-        with open(DIR+OUTFILE, 'wb') as file:
-            pickler = pickle.Pickler(file, -1)
-            pickler.dump(write_buffer)
 
-        group_radiuses = []
-        sholl_intersections = []
-        for group_no, count in enumerate(self.group_counts):
-            group_count = sum(self.group_counts[:group_no+1])
+        for group_no, count in enumerate(group_counts):
+            group_count = sum(group_counts[:group_no+1])
             group_radius = max(largest_radius[group_count-count:group_count])
-            group_radiuses.append(group_radius)
 
             current_intersections = no_of_intersections[group_count -
                                                         count:group_count]
@@ -898,25 +895,20 @@ class analyze_cells:
                 for i, intersection_val in enumerate(intersections):
                     intersection_dict[current_radiuses[i]].append(
                         intersection_val)
-            sholl_intersections.append(intersection_dict)
+            write_buffer[ANALYSES[1]][group_no] = intersection_dict
 
-        with open(DIR+"Sholl values", 'w') as text_file:
-            for group_no, group_sholl in enumerate(sholl_intersections):
-                text_file.write("Group: {}\n".format(group_no))
-                for radius, intersections in group_sholl.items():
-                    text_file.write("{} {}\n".format(radius, intersections))
+        with open(DIR+OUTFILE, 'wb') as file:
+            pickle.dump(write_buffer, file, -1)
 
-        for group_no, group_sholl in enumerate(sholl_intersections):
-            x = []
-            y = []
-            e = []
+        for group_no, group_sholl in write_buffer[ANALYSES[1]].items():
+            x, y, e = [], [], []
             for radius, intersections in group_sholl.items():
                 x.append(radius)
-                intersections = (
-                    intersections + self.group_counts[group_no] * [0])[:self.group_counts[group_no]]
+                intersections += group_counts[group_no] * [0]
+                intersections = intersections[:group_counts[group_no]]
                 y.append(np.mean(intersections))
                 e.append(scipy.stats.sem(intersections))
-            plt.errorbar(x, y, yerr=e, label=self.label[group_no])
+            plt.errorbar(x, y, yerr=e, label=label[group_no])
 
         plt.xlabel("Distance from soma")
         plt.ylabel("No. of intersections")
