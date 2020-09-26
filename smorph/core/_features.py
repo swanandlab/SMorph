@@ -4,7 +4,24 @@ from skimage.morphology import skeletonize
 from ..analysis.morphometric import *
 
 
-def extract_features(cell, shell_step_size, polynomial_degree):
+def _extract_cell_features(cell, shell_step_size, polynomial_degree):
+    """Returns all 23 Morphometric features from a cell image.
+
+    Parameters
+    ----------
+    cell : Cell
+        Cell object representing a cell of nervous system.
+    shell_step_size : int
+        Difference (in pixels) between concentric Sholl circles.
+    polynomial_degree : int
+        Degree of polynomial for fitting regression model on sholl values.
+
+    Returns
+    -------
+    dict
+        Represents all 23 morphological features interpreted from cell image.
+
+    """
     cleaned_image = cell.cleaned_image
 
     surface_area = get_surface_area(cleaned_image)

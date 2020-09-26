@@ -4,13 +4,28 @@ from copy import deepcopy
 from matplotlib.colors import is_color_like
 from skimage.color import rgb2gray
 
-from ._features import extract_features
+from ._features import _extract_cell_features
 from ..util import preprocess_image
 
 
 class Cell:
     """
     Container object for single cell analysis.
+
+    Parameters
+    ----------
+    cell_image : ndarray
+        RGB or Grayscale image data of cell of nervous system.
+    image_type : str
+        Neuroimaging technique used to get image data of neuronal cell,
+        either 'confocal' or 'DAB'.
+    reference_image : ndarray
+        `image` would be standardized to the exposure level of this example.
+    shell_step_size : int, optional
+        Difference (in pixels) between concentric Sholl circles, by default 3
+    polynomial_degree : int, optional
+        Degree of polynomial for fitting regression model on sholl values, by
+        default 3
 
     Attributes
     ----------
@@ -44,7 +59,7 @@ class Cell:
         self.image_type = image_type
         self.cleaned_image = preprocess_image(
             self.image, image_type, reference_image)
-        self.features = extract_features(
+        self.features = _extract_cell_features(
             self, shell_step_size, polynomial_degree)
 
     def plot_convex_hull(self):
