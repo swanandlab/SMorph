@@ -40,7 +40,40 @@ _ALL_FEATURE_NAMES = (
     'sholl_regression_coefficient',
     'regression_intercept')
 
-def _analyze_cells(groups_folders, img_type, save_features, shell_step_sz, show_logs):
+def _analyze_cells(groups_folders, img_type, shell_step_sz, save_features, show_logs):
+    """Performs complete reading & feature extraction for groups of cells.
+
+    Parameters
+    ----------
+    groups_folders : list
+        A list of strings containing path of each folder with image dataset.
+    img_type : str
+        Neuroimaging technique used to get image data of neuronal cell,
+        either 'confocal' or 'DAB'.
+    shell_step_sz : int
+        Difference (in pixels) between concentric Sholl circles, by default 3
+    save_features : bool
+        To save the features into a file.
+    show_logs : bool
+        To display logs of groups analysis.
+
+    Returns
+    -------
+    features : DataFrame
+        A DataFrame representing 23 morphometric of individual cells from
+        each group.
+    targets : list
+        Representing Group ID of each Cell.
+    sholl_original_plots : list
+        Original values for Sholl radii vs. no. of intersections for each cell.
+    sholl_polynomial_plots : list
+        Estimated values for Sholl radii vs. no. of intersections for each cell.
+    group_cnts : list
+        A list representing counts of members (cells) in each group.
+    file_names : list
+        Names of each cell image file.
+
+    """
     file_names, dataset = read_groups_folders(groups_folders)
 
     dataset_features, targets = [], []
@@ -89,6 +122,60 @@ def _analyze_cells(groups_folders, img_type, save_features, shell_step_sz, show_
 
 
 class Groups:
+    """Container object for groups of cells of nervous system
+    
+    It extract 23 Morphometric features of all the cells in each group &
+    provides group level sholl analysis, PCA & clustering according to
+    those features.
+
+    Parameters
+    ----------
+    groups_folders : list
+        Path to folders containing input cell images with each path
+        corresponding to different subgroups.
+    image_type : str
+        Neuroimaging technique used to get image data of all cells,
+        either 'confocal' or 'DAB'. This assumes that the group datasets are
+        of homogeneous `image_type`.
+    labels : dict
+        Group labels to be used for visualization. Specify for each group.
+    shell_step_size : int, optional
+        Difference (in pixels) between concentric Sholl circles, by default 3
+    save_features : bool, optional
+        To save a file containing morphometric features of each cell,
+        by default True
+    show_logs : bool, optional
+        To show logs of analysis of each cell, by default False
+
+    Attributes
+    ----------
+    features : DataFrame
+        A DataFrame representing 23 morphometric of individual cells from
+        each group.
+    shell_step_size : int
+        Difference (in pixels) between concentric Sholl circles, by default 3
+    file_names : list
+        Names of each cell image file.
+    targets : list
+        Representing Group ID of each Cell.
+    group_counts : list
+        A list representing counts of members (cells) in each group.
+    sholl_original_plots : list
+        Original values for Sholl radii vs. no. of intersections for each cell.
+    sholl_polynomial_plots : list
+        Estimated values for Sholl radii vs. no. of intersections for each cell.
+    labels : dict
+        Labels for each group to be used for visualization.
+    markers : dict
+        marker for each group to be used in visualization.
+    feature_significance : ndarray
+        Coefficient values for each feature used for calculating the PCA,
+        represents the significance of the feature.
+    projected : ndarray
+        Coordinates of each Cell in the multidimensional space defined by the
+        Principal Components.
+
+    """
     __slots__ = ('features', 'targets', 'sholl_original_plots', 'labels',
                  'sholl_polynomial_plots', 'pca_feature_names', 'markers',
                  'feature_significance', 'file_names', 'group_counts',
@@ -104,12 +191,19 @@ class Groups:
             self.sholl_polynomial_plots, 
             self.group_counts,
             self.file_names
-        ) = _analyze_cells(groups_folders, image_type, save_features,
-                           shell_step_size, show_logs)
+        ) = _analyze_cells(groups_folders, image_type,
+                           shell_step_size, save_features, show_logs)
 
         self.pca_feature_names = self.markers = self.feature_significance = None
 
-    def show_avg_sholl_plot(self, save_results=True):
+    def plot_avg_sholl_plot(self, save_results=True):
+        """Plots average Sholl Plot
+
+        Parameters
+        ----------
+        save_results : bool, optional
+            To save a file containing Sholl Plots for each cell, by default True
+        """
         ANALYSES = ['single_cell_intersections', 'group_cells_intersections']
         SINGLE_CELL_INTERSECTIONS = ['original_plot', 'polynomial_plot']
 
@@ -117,6 +211,7 @@ class Groups:
         no_of_intersections = []
         write_buffer = {ANALYSES[0]: {}, ANALYSES[1]: {}}
         file_names = self.file_names
+        shell_step_size = self.shell_step_size
         original_plots = self.sholl_original_plots
         polynomial_plots = self.sholl_polynomial_plots
         group_cnts = self.group_counts
@@ -167,7 +262,40 @@ class Groups:
         plt.legend()
         plt.show()
     
-    def pca(self, n_PC, color_dict, markers, save_results=True, on_features=None):
+    def pca(self, n_PC, color_dict, markers, on_features=None, save_results=True):
+        """Principal Component Analysis of morphological features of cells.
+
+        Parameters
+        ----------
+        n_PC : int
+            If greater than 1, return n_PC number of Principal Components after
+            clustering. If None & use_features is False, it's autoselected as
+            number of Principal Components calculated.
+        color_dict : dict
+            Dict with color to be used for each group.
+        marker : dict
+            Dict with marker for each group to be used in PCA plot.
+        on_features : list, optional
+            List of names of morphological features from which Principal
+            Components will be derived, by default None.
+            If None, all 23 morphological features will be used.
+        save_results : bool, optional
+            To save a file containing PCA values, by default True
+
+        Returns
+        -------
+        var_PCs : ndarray
+            Captured variance ratios of each Principal Component.
+
+        Raises
+        ------
+        ValueError
+            * If n_PC isn't greater than 1 & less than the total number of
+            morphological features of cells.
+            * If element(s) of on_features is/are not in list of all
+            morphological features.
+
+        """
         all_features = list(_ALL_FEATURE_NAMES)
         targets = self.targets
         labels = self.labels
@@ -186,6 +314,10 @@ class Groups:
         self.markers = markers
 
         def get_cov_ellipse(cov, centre, nstd, **kwargs):
+            """Return an Ellipse patch representing the covariance matrix
+            `cov` centred at `centre` and scaled by the factor `nstd`.
+
+            """
             # Find and sort eigenvalues and eigenvectors into descending order
             eigvals, eigvecs = np.linalg.eigh(cov)
             order = eigvals.argsort()[::-1]
@@ -256,35 +388,55 @@ class Groups:
 
         return var_PCs
 
-    def plot_feature_histograms(self):
-        pca_feature_names = self.pca_feature_names
-        targets = self.targets
-        n_PCA_features = len(pca_feature_names)
+    def plot_feature_histograms(self, features=list(_ALL_FEATURE_NAMES)):
+        """Plots feature significance heatmap.
 
-        axes = plt.subplots((n_PCA_features+1)//2, 2, figsize=(15, 12))[1]
-        data = self.features[pca_feature_names].to_numpy()
+        Raises
+        ------
+        ValueError
+            If `features` is not a subset of 23 Morphometric features.
 
-        ko = data[np.where(np.array(targets) == 0)[0]]
-        control = data[np.where(np.array(targets) == 1)[0]]
+        """
+        if not set(features).issubset(features):
+            raise ValueError('Given feature names must be a subset or equal to '
+                             'set of 23 Morphometric features.')
+
+        axes = plt.subplots((len(features)+1)//2, 2, figsize=(15, 12))[1]
+        data = self.features[features].to_numpy()
+
+        ko = data[np.where(np.array(self.targets) == 0)[0]]
+        control = data[np.where(np.array(self.targets) == 1)[0]]
         ax = axes.ravel()  # flat axes with numpy ravel
 
-        for i in range(len(pca_feature_names)):
+        for i in range(len(features)):
             bins = np.histogram(data[:, i], bins=40)[1]
             # red color for malignant class
             ax[i].hist(ko[:, i], bins=bins, color='r', alpha=.5)
             # alpha is for transparency in the overlapped region
             ax[i].hist(control[:, i], bins=bins, color='g', alpha=0.3)
-            ax[i].set_title(pca_feature_names[i], fontsize=9)
+            ax[i].set_title(features[i], fontsize=9)
             # x-axis co-ordinates aren't so useful, as we just want to
             # look how well separated the histograms are
             ax[i].axes.get_xaxis().set_visible(False)
             ax[i].set_yticks(())
 
-        ax[0].legend(self.markers, loc='best', fontsize=8)
-        plt.tight_layout()  # let's make good plots
+        ax[0].legend(self.marker, loc='best', fontsize=8)
+        plt.tight_layout()
         plt.show()
 
     def plot_feature_significance_heatmap(self):
+        """Plots feature significance heatmap.
+
+        Raises
+        ------
+        RuntimeError
+            If Principal Components are not found before plotting
+            feature significance heatmap.
+
+        """
+        if not hasattr(self, 'projected'):
+            raise RuntimeError('Principal Components must be found before '
+                               'plotting feature significance heatmap.')
         n_PC = self.feature_significance.shape[0]
         feature_significance = self.feature_significance
         significance_order_PC_1 = np.argsort(feature_significance[0])
@@ -309,6 +461,18 @@ class Groups:
         plt.show()
 
     def plot_feature_significance_vectors(self):
+        """Plots feature significance vectors after PCA.
+
+        Raises
+        ------
+        RuntimeError
+            If Principal Components are not found before plotting
+            feature significance vectors.
+
+        """
+        if not hasattr(self, 'projected'):
+            raise RuntimeError('Principal Components must be found before '
+                               'plotting feature significance vectors.')
         score = self.projected
         coeff = np.transpose(self.feature_significance)
         labels = self.pca_feature_names
@@ -334,6 +498,32 @@ class Groups:
         plt.show()
 
     def get_clusters(self, k=None, use_features=True, n_PC=None, plot='parallel'):
+        """
+        Highly configurable K-Means clustering & visualization of cell data.
+
+        Parameters
+        ----------
+        k : int or None, default None
+            If greater than 1, return k number of clusters. Else if None it is
+            autoselected, on basis of maximum Calinski Harabasz Score.
+        use_features : bool, default True
+            If True, clustering would use original set of morphometric features.
+        n_PC : int or None, default None
+            If greater than 1, return n_PC number of Principal Components after
+            clustering. If None & use_features is False, it's autoselected as
+            number of Principal Components calculated.
+        plot : str or None, default 'parallel'
+            The type of plot user would like to get, either parallel or scatter.
+
+        Returns
+        -------
+        centers_df
+            A DataFrame with normalized center coordinates of each cluster.
+        df
+            A DataFrame with normalized cell coordinates & the respective
+            cluster to which they belong.
+
+        """
         all_features = self.features
         group_cnts = self.group_counts
         labels = iter(self.labels.values())

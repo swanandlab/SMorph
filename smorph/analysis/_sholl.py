@@ -32,7 +32,7 @@ def sholl_analysis(shell_step_size, polynomial_degree, largest_radius, padded_sk
 
     determination_ratio = _get_determination_ratio(semi_log_r2, log_log_r2)
 
-    normalization_mthd = "Semi-log" if determination_ratio > 1 else "Log-log"
+    norm_mthd = "Semi-log" if determination_ratio > 1 else "Log-log"
 
     critical_radius = get_critical_radius(
         non_zero_radii, predicted_n_intersections)
@@ -49,17 +49,17 @@ def sholl_analysis(shell_step_size, polynomial_degree, largest_radius, padded_sk
                             non_zero_n_intersections)
 
     coefficient_of_determination = get_coefficient_of_determination(
-        normalization_mthd,
+        norm_mthd,
         semi_log_r2,
         log_log_r2
     )
     sholl_regression_coeff = get_sholl_regression_coeff(
-        normalization_mthd,
+        norm_mthd,
         semi_log_regression_coeff,
         log_log_regression_coeff
     )
     regression_intercept = get_regression_intercept(
-        normalization_mthd,
+        norm_mthd,
         semi_log_regression_intercept,
         log_log_regression_intercept
     )
@@ -132,7 +132,7 @@ def get_intersections(shell_step_size, padded_skeleton, pad_sk_soma, largest_rad
 
 
 def polynomial_fit(polynomial_degree, radii, n_intersections):
-    # Linear polynomial regression to describe the relationship between intersections vs. distance
+    """Models relationship between intersections & radii."""
 
     # till last non-zero value
     last_intersection_index = np.max(np.nonzero(n_intersections))
@@ -159,7 +159,7 @@ def polynomial_fit(polynomial_degree, radii, n_intersections):
 
 
 def get_enclosing_radius(non_zero_radii, non_zero_n_intersections):
-    # index of last non-zero value in the array containing radii
+    """Index of last non-zero value in the array containing radii."""
     return non_zero_radii[len(non_zero_n_intersections) - (non_zero_n_intersections != 0)[::-1].argmax() - 1]
 
 
@@ -174,7 +174,7 @@ def get_critical_value(predicted_n_intersections):
 
 
 def get_skewness(polynomial_model, polynomial_degree, non_zero_n_intersections):
-    # indication of how symmetrical the polynomial distribution is around its mean
+    # Indication of how symmetrical polynomial distribution is around its mean.
     reshaped_x = non_zero_n_intersections.reshape((-1, 1))
     x_ = PolynomialFeatures(
         degree=polynomial_degree, include_bias=False).fit_transform(reshaped_x)
@@ -224,25 +224,26 @@ def _get_determination_ratio(semi_log_r2, log_log_r2):
     return semi_log_r2 / log_log_r2
 
 
-def get_coefficient_of_determination(normalization_mthd, semi_log_r2, log_log_r2):
-    # how close the data are to the fitted regression (indicative of the level of explained variability in the data set)
-    if normalization_mthd == "Semi-log":
+def get_coefficient_of_determination(norm_mthd, semi_log_r2, log_log_r2):
+    # how close the data are to the fitted regression (indicative of the level
+    # of explained variability in the data set)
+    if norm_mthd == "Semi-log":
         return round(semi_log_r2, 2)
     else:
         return round(log_log_r2, 2)
 
 
-def get_regression_intercept(normalization_mthd, semi_log_regression_intercept, log_log_regression_intercept):
+def get_regression_intercept(norm_mthd, semi_log_regression_intercept, log_log_regression_intercept):
     # Y intercept of the logarithmic plot
-    if normalization_mthd == "Semi-log":
+    if norm_mthd == "Semi-log":
         return round(semi_log_regression_intercept, 2)
     else:
         return round(log_log_regression_intercept, 2)
 
 
-def get_sholl_regression_coeff(normalization_mthd, semi_log_regression_coeff, log_log_regression_coeff):
-    # rate of decay of no. of branches
-    if normalization_mthd == "Semi-log":
+def get_sholl_regression_coeff(norm_mthd, semi_log_regression_coeff, log_log_regression_coeff):
+    """Rate of decay of no. of branches."""
+    if norm_mthd == "Semi-log":
         return round(semi_log_regression_coeff, 2)
     else:
         return round(log_log_regression_coeff, 2)

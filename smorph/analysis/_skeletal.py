@@ -8,7 +8,21 @@ from skimage.util import invert
 
 
 def _get_blobs(cell_image, image_type):
-    # Extracts circular blobs in cell image for finding soma later
+    """Extracts circular blobs in cell image for finding soma later.
+
+    Parameters
+    ----------
+    cell_image : ndarray
+        Grayscale image data of cell of nervous system.
+    image_type : str
+        Neuroimaging technique used to get image data of neuronal cell,
+        either 'confocal' or 'DAB'.
+
+    Returns
+    -------
+    ndarray
+        Coordinates & radius of each blob.
+    """
 
     if image_type == "DAB":
         inverted_cell_image = invert(cell_image)
@@ -22,7 +36,7 @@ def _get_blobs(cell_image, image_type):
                              threshold, overlap)
 
         def eliminate_border_blobs(blobs_log):
-            # find the blobs too close to border so as to eliminate them
+            """Find the blobs too close to border so as to eliminate them."""
             border_x = cell_image.shape[1] / 5
             border_y = cell_image.shape[0] / 5
 
@@ -48,9 +62,10 @@ def _get_blobs(cell_image, image_type):
 
 
 def _centre_of_mass(blobs, cell_image, image_type):
-    # finds centre of mass of the multiple blobs detected
+    """Finds centre of mass of the multiple blobs detected.
 
-    # find the blob with highest intensity value
+    Find the blob with highest intensity value.
+    """
     ixs = np.indices(cell_image.shape)
 
     n_blobs = blobs.shape[0]
@@ -83,7 +98,7 @@ def _centre_of_mass(blobs, cell_image, image_type):
 
 
 def _get_soma(cell_image, image_type):
-    # calculate pixel position to be attribute as soma
+    """Calculate pixel position to be attribute as soma."""
 
     soma_blobs = _get_blobs(cell_image, image_type)
 
@@ -100,12 +115,12 @@ def get_surface_area(cleaned_image_filled_holes):
 
 
 def _distance(P1, P2):
-    # find eucledian _distance between two pixel positions
+    """Finds the Eucledian distance between two pixel positions."""
     return ((P1[0] - P2[0])**2 + (P1[1] - P2[1])**2) ** 0.5
 
 
 def pad_skeleton(cell_skeleton, soma_on_skeleton):
-
+    """Adds padding to cell skeleton image."""
     # get all the pixel indices representing skeleton
     skeleton_indices = np.nonzero(cell_skeleton)
 
@@ -141,6 +156,7 @@ def _cmp(branch, path):
 
 
 def _eliminate_loops(branch_stats, paths_list):
+    """Eliminate loops in branches."""
     loop_indices = []
     loop_branch_end_pts = []
 
@@ -176,6 +192,7 @@ def _eliminate_loops(branch_stats, paths_list):
 
 
 def get_soma_on_skeleton(cell_image, image_type, cell_skeleton):
+    """Retrieves soma's position on cell skeleton."""
     soma = _get_soma(cell_image, image_type)
     skeleton_pixel_coordinates = [(i, j) for (
         i, j), val in np.ndenumerate(cell_skeleton) if val != 0]
@@ -201,7 +218,6 @@ def get_convex_hull(cell):
 
 
 def get_no_of_forks(cell):
-
     # get the degree for every cell pixel (no. of neighbouring pixels)
     degrees = skeleton_to_csgraph(cell.skeleton)[2]
     # array of all pixel locations with degree more than 2
