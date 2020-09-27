@@ -25,7 +25,8 @@ environment either directly to session storage or to your Google Drive account.
 
 Instructions for linking your *Google Drive* dataset:
 
-- Either select `Mount Drive` from sidebar `Files` menu or manually execute the the following code in a cell.
+- Either select `Mount Drive` from sidebar `Files` browser or manually execute
+the following code in a cell.
 
 ```python
 from google.colab import drive
@@ -34,7 +35,8 @@ drive.mount('/content/drive')
 
 - After completing the authorization, paste the authorization code in the input.
 
-- After confirmation, refresh the Files sidebar. Your drive would now be visible in Files sidebar.
+- After confirmation, refresh the Files sidebar. Your drive would now be visible
+in it.
 
 - Follow the same instructions in the following Usage section for
 organization of your data.
