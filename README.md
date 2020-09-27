@@ -3,12 +3,12 @@
 This library automates the morphological analysis of astrocytes and classify
 different subgroups based on the extracted morphometric parameters.
 
-The notebook `single_cell_analysis.ipynb` includes the visual analysis to
-explore various morphological parameters of a single cell. And the notebook
-`group_analysis.ipynb` includes the group level analysis of cells of the
-Nervous System using Principal Component Analysis (PCA) which helps to
-distinguish the differences between different classes of cells based on their
-morphological parameters.
+The notebook [single_cell_analysis.ipynb](./single_cell_analysis.ipynb)
+includes the visual analysis to explore various morphological parameters of a
+single cell. And the notebook [group_analysis.ipynb](./group_analysis.ipynb)
+includes the group level analysis of cells of the Nervous System using
+Principal Component Analysis (PCA) which helps to distinguish the differences
+between different classes of cells based on their morphological parameters.
 
 ## Quickstart
 
@@ -16,12 +16,27 @@ The package can be easily used in local and Colaboratory environment.
 
 ### Colaboratory
 
-Just goto
-[single_cell_analysis.ipynb](https://colab.research.google.com/github/parulsethi/SMorph/blob/master/group_analysis.ipynb)
+Just go to
+[single_cell_analysis.ipynb](https://colab.research.google.com/github/parulsethi/SMorph/blob/master/single_cell_analysis.ipynb)
 for Single Cell analysis, and
-[group_analysis.ipynb](https://colab.research.google.com/github/parulsethi/SMorph/blob/master/single_cell_analysis.ipynb)
+[group_analysis.ipynb](https://colab.research.google.com/github/parulsethi/SMorph/blob/master/group_analysis.ipynb)
 for Group Cells analysis. You'll have to upload you data to Colab Colaboratory
-environment. Follow the same instructions in the following Usage section for
+environment either directly to session storage or to your Google Drive account.
+
+Instructions for linking your *Google Drive* dataset:
+
+- Either select `Mount Drive` from sidebar `Files` menu or manually execute the the following code in a cell.
+
+```python
+from google.colab import drive
+drive.mount('/content/drive')
+```
+
+- After completing the authorization, paste the authorization code in the input.
+
+- After confirmation, refresh the Files sidebar. Your drive would now be visible in Files sidebar.
+
+- Follow the same instructions in the following Usage section for
 organization of your data.
 
 The same notebook can also run on your local environment.
