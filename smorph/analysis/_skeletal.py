@@ -115,7 +115,7 @@ def get_surface_area(cleaned_image_filled_holes):
 
 
 def _distance(P1, P2):
-    """Finds the Eucledian distance between two pixel positions."""
+    """Finds the Euclidian distance between two pixel positions."""
     return ((P1[0] - P2[0])**2 + (P1[1] - P2[1])**2) ** 0.5
 
 
