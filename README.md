@@ -10,11 +10,27 @@ Nervous System using Principal Component Analysis (PCA) which helps to
 distinguish the differences between different classes of cells based on their
 morphological parameters.
 
-## Installation
+## Quickstart
 
-The code has been tested for Python 3.7 and above, if you don't have it
+The package can be easily used in local and Colaboratory environment.
+
+### Colaboratory
+
+Just goto
+[single_cell_analysis.ipynb](https://colab.research.google.com/github/parulsethi/SMorph/blob/master/group_analysis.ipynb)
+for Single Cell analysis, and
+[group_analysis.ipynb](https://colab.research.google.com/github/parulsethi/SMorph/blob/master/single_cell_analysis.ipynb)
+for Group Cells analysis. You'll have to upload you data to Colab Colaboratory
+environment. Follow the same instructions in the following Usage section for
+organization of your data.
+
+The same notebook can also run on your local environment.
+
+## Installation from source
+
+The code has been tested for Python 3.6.1 and above, if you don't have it
 installed, please download the binaries from
-[Python releases](https://www.python.org/downloads/release/python-370) and
+[here](https://www.python.org/downloads/) and
 follow the installation guide.
 
 SMorph uses [Poetry](https://python-poetry.org) package manager.
@@ -33,6 +49,21 @@ python -m pip install -r requirements.txt
 poetry install
 ```
 
+## Setup for analysis on local environment
+
+To run the notebooks, execute following from command line and locate to the
+desired notebook using browser.
+
+```sh
+jupyter notebook
+```
+
+If the above command throw errors on windows, please try:
+
+```sh
+python -m notebook
+```
+
 ## Usage
 
 ### Group analysis
@@ -47,16 +78,3 @@ Run the analysis by replacing the value of `groups_folders` variable in
 
 Run the analysis by replacing the value of `cell_image` variable in
 `single_cell_analysis.ipynb` with path to your cell image.
-
-To run the notebooks, execute following from command line and locate to the
-desired notebook using browser.
-
-```sh
-jupyter notebook
-```
-
-If the above commands throw errors on windows, please try:
-
-```sh
-python -m notebook
-```
