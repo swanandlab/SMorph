@@ -420,7 +420,7 @@ class Groups:
             ax[i].axes.get_xaxis().set_visible(False)
             ax[i].set_yticks(())
 
-        ax[0].legend(self.marker, loc='best', fontsize=8)
+        ax[0].legend(self.markers, loc='best', fontsize=8)
         plt.tight_layout()
         plt.show()
 
