@@ -82,33 +82,40 @@ def _analyze_cells(groups_folders, img_type, shell_step_sz, save_features, show_
     sholl_polynomial_plots = []
 
     group_cnts = []
+    bad_cells_idx = []
     cell_cnt = 0
 
     for group_no, group in enumerate(dataset):
         group_cell_cnt = 0
         for cell_image in group:
             if show_logs:
-                print(file_names[cell_cnt])
+                print('Analyzing:', file_names[cell_cnt])
 
             cell_cnt += 1
-            group_cell_cnt += 1
+            try:
+                cell = Cell(cell_image, img_type, shell_step_size=shell_step_sz)
+                cell_features = list(cell.features.values())
+                group_cell_cnt += 1
 
-            targets.append(group_no)
+                targets.append(group_no)
 
-            cell = Cell(cell_image, img_type, shell_step_size=shell_step_sz)
-            cell_features = list(cell.features.values())
+                sholl_original_plots.append(
+                    (cell._sholl_radii, cell._sholl_intersections))
 
-            sholl_original_plots.append(
-                (cell._sholl_radii, cell._sholl_intersections))
+                sholl_polynomial_plots.append((
+                    cell._non_zero_sholl_radii,
+                    cell._non_zero_sholl_intersections))
 
-            sholl_polynomial_plots.append((
-                cell._non_zero_sholl_radii,
-                cell._non_zero_sholl_intersections))
-
-            dataset_features.append(cell_features)
+                dataset_features.append(cell_features)
+            except Exception as err:
+                bad_cells_idx.append(cell_cnt - 1)
+                print(f'Warning: Skipping analysis of "{file_names[cell_cnt]}"',
+                      f'due to {err}.')
 
         group_cnts.append(group_cell_cnt)
 
+    file_names = [cell_name for idx, cell_name in enumerate(file_names)
+                  if idx not in bad_cells_idx]
     features = DataFrame(dataset_features, columns=_ALL_FEATURE_NAMES)
 
     if save_features == True:
@@ -123,7 +130,7 @@ def _analyze_cells(groups_folders, img_type, shell_step_sz, save_features, show_
 
 class Groups:
     """Container object for groups of cells of nervous system
-    
+
     It extract 23 Morphometric features of all the cells in each group &
     provides group level sholl analysis, PCA & clustering according to
     those features.
