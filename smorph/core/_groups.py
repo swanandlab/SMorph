@@ -561,7 +561,9 @@ class Groups:
             if n_PC == None:
                 scaler = preprocessing.MaxAbsScaler()
                 features = all_features.to_numpy()
-                df = DataFrame(scaler.fit(features).transform(features))
+                COLUMN_NAMES = ['normalized_'+itr for itr in _ALL_FEATURE_NAMES]
+                df = DataFrame(scaler.fit(features).transform(features),
+                               columns=COLUMN_NAMES)
             else:
                 raise ValueError('Cannot use morphological features & n_PC '
                                     'simultaneously')
@@ -577,8 +579,8 @@ class Groups:
                 n_PC = projected.shape[1]
 
             if 1 < n_PC <= projected.shape[1]:
-                PC_COLUMN_NAMES = [f'PC {itr}' for itr in range(1, n_PC+1)]
-                df = DataFrame(projected[:, :n_PC], columns=PC_COLUMN_NAMES)
+                COLUMN_NAMES = [f'PC {itr}' for itr in range(1, n_PC+1)]
+                df = DataFrame(projected[:, :n_PC], columns=COLUMN_NAMES)
             else:
                 raise ValueError('Number of Principal Components, n_PC, should '
                                  'be greater than 1 & less than or equal to the'
@@ -595,7 +597,7 @@ class Groups:
 
         # creates a dataframe with a column for cluster number
         centers_df = DataFrame(kmeans_model.cluster_centers_,
-                               columns=PC_COLUMN_NAMES)
+                               columns=COLUMN_NAMES)
         centers_df['cluster'] = range(k)
 
         LABEL_COLOR_MAP = color_palette(None, k)
@@ -604,6 +606,7 @@ class Groups:
             plt.figure(figsize=(15, 8)).gca().axes.set_ylim([-3, 3])
             parallel_coordinates(data, 'cluster',
                                     color=LABEL_COLOR_MAP, marker='o')
+            plt.xticks(rotation=90)
 
         def scatter_plot(data, centers):
             l_idx = r_idx = 0
