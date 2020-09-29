@@ -532,7 +532,7 @@ class Groups:
 
         """
         all_features = self.features
-        group_cnts = self.group_counts
+        group_cnts = self.group_counts.copy()
         labels = iter(self.labels.values())
         markers = iter(self.markers.values())
         n_cells = all_features.shape[0]
@@ -666,6 +666,21 @@ class Groups:
         print('Using', ('principal components',
                         'morphometric features')[use_features])
 
+        n_groups = len(group_cnts)
+        group_cnts.insert(0, 0)
+        group_pos = np.cumsum(group_cnts)
+
         df['cluster'] = kmeans_model.labels_
+
+        print('Cluster distribution in groups:')
+        for idx, r_pos in enumerate(group_pos):
+            if idx == 0:
+                continue
+            dist_msg = f'- {self.labels[idx - 1]} has '
+            l_pos = group_pos[idx - 1]
+            group_cluster_dist = df['cluster'][l_pos : r_pos].value_counts()
+            for i, j in enumerate(group_cluster_dist):
+                dist_msg += f'{j} cells in Cluster {i}{(".", ",")[i < k-1]} '
+            print(dist_msg)
 
         return centers_df, df
