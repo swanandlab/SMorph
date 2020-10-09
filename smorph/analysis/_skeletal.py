@@ -104,6 +104,8 @@ def _get_soma(cell_image, image_type):
 
     soma_blobs = _get_blobs(cell_image, image_type)
 
+    if len(soma_blobs) == 0:
+        raise RuntimeError('No soma detected for the cell!')
     if len(soma_blobs) == 1:
         soma = soma_blobs[0][:2]
     if len(soma_blobs) > 1:
