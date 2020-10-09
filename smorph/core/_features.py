@@ -1,7 +1,22 @@
 import numpy as np
 from skimage.morphology import skeletonize
 
-from ..analysis.morphometric import *
+from ..analysis.morphometric import (
+    get_surface_area,
+    pad_skeleton,
+    get_soma_on_skeleton,
+    get_total_length,
+    get_avg_process_thickness,
+    get_convex_hull,
+    get_no_of_forks,
+    classify_branching_structure,
+    get_primary_branches,
+    get_secondary_branches,
+    get_tertiary_branches,
+    get_quatenary_branches,
+    get_terminal_branches,
+    sholl_analysis
+)
 
 
 def _extract_cell_features(cell, shell_step_size, polynomial_degree):
@@ -84,7 +99,6 @@ def _extract_cell_features(cell, shell_step_size, polynomial_degree):
     largest_radius = np.max([sk_soma[1], abs(sk_soma[1]-skeleton_br),
                              sk_soma[0], abs(sk_soma[0]-skeleton_ht)])
     largest_radius = int(1.3 * largest_radius)
-
 
     sholl_results = sholl_analysis(shell_step_size, polynomial_degree,
                                    largest_radius, padded_skeleton,
