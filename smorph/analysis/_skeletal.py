@@ -3,7 +3,7 @@ from scipy.ndimage import generate_binary_structure, label
 from skan import skeleton_to_csgraph
 from skan.csr import Skeleton, branch_statistics
 from skimage.feature import blob_log
-from skimage.morphology import convex_hull_image, skeletonize
+from skimage.morphology import convex_hull_image
 from skimage.util import invert
 
 
@@ -81,8 +81,8 @@ def _centre_of_mass(blobs, cell_image, image_type):
     blob_intensities = np.full(
         (n_blobs, *ixs.shape[1:]), cell_image)
     blob_intensities = (blob_intensities * mask).reshape(mask.shape[0], -1)
-    blob_intensities = np.divide(
-        blob_intensities.sum(1), (blob_intensities != 0).sum(1))
+    blob_intensities[blob_intensities < .02 * blob_intensities.max()] = 0
+    blob_intensities = blob_intensities.sum(1) * (blob_intensities != 0).sum(1)
 
     if image_type == "DAB":
         max_intensity = blob_centres[np.argmin(blob_intensities)]
@@ -90,9 +90,11 @@ def _centre_of_mass(blobs, cell_image, image_type):
         return max_intensity
 
     elif image_type == "confocal":
-        max_radius = blob_centres[np.argmax(blob_radii)]
-        max_intensity = blob_centres[np.argmax(blob_intensities)]
-        if len(blob_radii) > len(set(blob_radii)):
+        max_radius_idx = np.argmax(blob_radii)
+        max_intensity_idx = np.argmax(blob_intensities)
+        max_radius = blob_centres[max_radius_idx]
+        max_intensity = blob_centres[max_intensity_idx]
+        if np.count_nonzero(blob_radii == blob_radii[max_radius_idx]) > 1:
             return max_intensity
         return max_radius
 
