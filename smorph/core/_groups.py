@@ -40,7 +40,15 @@ _ALL_FEATURE_NAMES = (
     'sholl_regression_coefficient',
     'regression_intercept')
 
-def _analyze_cells(groups_folders, img_type, shell_step_sz, save_features, show_logs):
+
+def _analyze_cells(
+    groups_folders,
+    img_type,
+    groups_crop_tech,
+    shell_step_sz,
+    save_features,
+    show_logs
+):
     """Performs complete reading & feature extraction for groups of cells.
 
     Parameters
@@ -50,6 +58,11 @@ def _analyze_cells(groups_folders, img_type, shell_step_sz, save_features, show_
     img_type : str
         Neuroimaging technique used to get image data of neuronal cell,
         either 'confocal' or 'DAB'.
+    groups_crop_tech : list
+        List of techniques used to crop each group's cell images from tissue
+        image, elements can be either 'manual' or 'auto', by default 'manual'
+        for all groups. (Assumes all images in a group are captured via the
+        same cropping technique)
     shell_step_sz : int
         Difference (in pixels) between concentric Sholl circles, by default 3
     save_features : bool
@@ -65,9 +78,11 @@ def _analyze_cells(groups_folders, img_type, shell_step_sz, save_features, show_
     targets : list
         Representing Group ID of each Cell.
     sholl_original_plots : list
-        Original values for Sholl radii vs. no. of intersections for each cell.
+        Original values for Sholl radii vs. no. of intersections for each
+        cell.
     sholl_polynomial_plots : list
-        Estimated values for Sholl radii vs. no. of intersections for each cell.
+        Estimated values for Sholl radii vs. no. of intersections for each
+        cell.
     group_cnts : list
         A list representing counts of members (cells) in each group.
     file_names : list
@@ -84,6 +99,13 @@ def _analyze_cells(groups_folders, img_type, shell_step_sz, save_features, show_
     group_cnts = []
     bad_cells_idx = []
     cell_cnt = 0
+    N_GROUPS = len(groups_folders)
+
+    if groups_crop_tech is None:
+        groups_crop_tech = ['manual' for i in range(N_GROUPS)]
+    
+    if type(groups_crop_tech) == str:
+        groups_crop_tech = [groups_crop_tech for i in range(N_GROUPS)]
 
     for group_no, group in enumerate(dataset):
         group_cell_cnt = 0
@@ -93,7 +115,9 @@ def _analyze_cells(groups_folders, img_type, shell_step_sz, save_features, show_
 
             cell_cnt += 1
             try:
-                cell = Cell(cell_image, img_type, shell_step_size=shell_step_sz)
+                cell = Cell(cell_image, img_type,
+                            crop_tech=groups_crop_tech[group_no],
+                            shell_step_size=shell_step_sz)
                 cell_features = list(cell.features.values())
                 group_cell_cnt += 1
 
@@ -109,8 +133,8 @@ def _analyze_cells(groups_folders, img_type, shell_step_sz, save_features, show_
                 dataset_features.append(cell_features)
             except Exception as err:
                 bad_cells_idx.append(cell_cnt - 1)
-                print(f'Warning: Skipping analysis of "{file_names[cell_cnt]}"',
-                      f'due to {err}.')
+                print('Warning: Skipping analysis of',
+                      f'"{file_names[cell_cnt]}" due to {err}.')
 
         group_cnts.append(group_cell_cnt)
 
@@ -144,6 +168,11 @@ class Groups:
         Neuroimaging technique used to get image data of all cells,
         either 'confocal' or 'DAB'. This assumes that the group datasets are
         of homogeneous `image_type`.
+    groups_crop_tech : list or str
+        Representing techniques used to crop each group's cell images from
+        tissue image, elements can be either 'manual' or 'auto', by default
+        'manual' for all groups. (Assumes all images in a group are captured
+        via the same cropping technique)
     labels : dict
         Group labels to be used for visualization. Specify for each group.
     shell_step_size : int, optional
@@ -168,9 +197,11 @@ class Groups:
     group_counts : list
         A list representing counts of members (cells) in each group.
     sholl_original_plots : list
-        Original values for Sholl radii vs. no. of intersections for each cell.
+        Original values for Sholl radii vs. no. of intersections for each
+        cell.
     sholl_polynomial_plots : list
-        Estimated values for Sholl radii vs. no. of intersections for each cell.
+        Estimated values for Sholl radii vs. no. of intersections for each
+        cell.
     labels : dict
         Labels for each group to be used for visualization.
     markers : dict
@@ -187,7 +218,17 @@ class Groups:
                  'sholl_polynomial_plots', 'pca_feature_names', 'markers',
                  'feature_significance', 'file_names', 'group_counts',
                  'projected', 'shell_step_size')
-    def __init__(self, groups_folders, image_type, labels, shell_step_size=3, save_features=True, show_logs=False):
+
+    def __init__(
+        self,
+        groups_folders,
+        image_type,
+        groups_crop_tech,
+        labels,
+        shell_step_size=3,
+        save_features=True,
+        show_logs=False
+    ):
         self.labels = labels
         self.shell_step_size = shell_step_size
 
@@ -195,13 +236,15 @@ class Groups:
             self.features,
             self.targets,
             self.sholl_original_plots,
-            self.sholl_polynomial_plots, 
+            self.sholl_polynomial_plots,
             self.group_counts,
             self.file_names
-        ) = _analyze_cells(groups_folders, image_type,
+        ) = _analyze_cells(groups_folders, image_type, groups_crop_tech,
                            shell_step_size, save_features, show_logs)
 
-        self.pca_feature_names = self.markers = self.feature_significance = None
+        self.pca_feature_names = None
+        self.markers = None
+        self.feature_significance = None
 
     def plot_avg_sholl_plot(self, save_results=True):
         """Plots average Sholl Plot
@@ -209,7 +252,8 @@ class Groups:
         Parameters
         ----------
         save_results : bool, optional
-            To save a file containing Sholl Plots for each cell, by default True
+            To save a file containing Sholl Plots for each cell,
+            by default True
         """
         ANALYSES = ['single_cell_intersections', 'group_cells_intersections']
         SINGLE_CELL_INTERSECTIONS = ['original_plot', 'polynomial_plot']
@@ -268,16 +312,23 @@ class Groups:
         plt.ylabel("No. of intersections")
         plt.legend()
         plt.show()
-    
-    def pca(self, n_PC, color_dict, markers, on_features=None, save_results=True):
+
+    def pca(
+        self,
+        n_PC,
+        color_dict,
+        markers,
+        on_features=None,
+        save_results=True
+    ):
         """Principal Component Analysis of morphological features of cells.
 
         Parameters
         ----------
         n_PC : int
-            If greater than 1, return n_PC number of Principal Components after
-            clustering. If None & use_features is False, it's autoselected as
-            number of Principal Components calculated.
+            If greater than 1, return n_PC number of Principal Components
+            after clustering. If None & use_features is False, it's
+            autoselected as number of Principal Components calculated.
         color_dict : dict
             Dict with color to be used for each group.
         marker : dict
@@ -309,9 +360,9 @@ class Groups:
 
         if n_PC < 2 or n_PC >= len(all_features):
             raise ValueError('Principal Components must be greater than 1 & '
-                            'less than number of morphological features.')
+                             'less than number of morphological features.')
 
-        if on_features == None:
+        if on_features is None:
             on_features = all_features
         elif not all(feature in all_features for feature in set(on_features)):
             raise ValueError('Selected Principal Components are not a subset '
@@ -378,7 +429,7 @@ class Groups:
                 mean_PC_2 = np.mean(PC_2[ix])
                 cov = np.cov(PC_1, PC_2)
                 ax.scatter(PC_1[ix], PC_2[ix], c=color_dict[l], s=40,
-                            label=labels[l], marker=markers[l])
+                           label=labels[l], marker=markers[l])
                 e = get_cov_ellipse(cov, (mean_PC_1, mean_PC_2),
                                     n_std, fc=color_dict[l], alpha=0.4)
                 ax.add_artist(e)
@@ -461,10 +512,10 @@ class Groups:
 
         plt.matshow(np.array(sorted_feature_significance), cmap='gist_heat')
         plt.yticks(list(range(n_PC)), [
-                    f'PC {i+1}' for i in range(n_PC)], fontsize=10)
+            f'PC {i+1}' for i in range(n_PC)], fontsize=10)
         plt.colorbar(orientation='horizontal')
         plt.xticks(range(len(sorted_feature_names)),
-                    sorted_feature_names, rotation=65, ha='left')
+                   sorted_feature_names, rotation=65, ha='left')
         plt.show()
 
     def plot_feature_significance_vectors(self):
@@ -504,7 +555,13 @@ class Groups:
         ax.set_ylabel('PC 2')
         plt.show()
 
-    def get_clusters(self, k=None, use_features=True, n_PC=None, plot='parallel'):
+    def get_clusters(
+        self,
+        k=None,
+        use_features=True,
+        n_PC=None,
+        plot='parallel'
+    ):
         """
         Highly configurable K-Means clustering & visualization of cell data.
 
@@ -538,9 +595,9 @@ class Groups:
         n_cells = all_features.shape[0]
         seed = np.random.randint(0, n_cells)  # for deterministic randomness
 
-        if k != None and (k < 2 or k > n_cells):
+        if k is not None and (k < 2 or k > n_cells):
             raise ValueError('Number of clusters, k, must be greater than 1 & '
-                                'lesser than the total number of cells.')
+                             'lesser than the total number of cells.')
 
         if plot not in [None, 'parallel', 'scatter']:
             raise ValueError('Plot must be either of parallel or scatter.')
@@ -548,7 +605,7 @@ class Groups:
         def compute_clusters(n_clusters, normalized_features, max_clusters):
             best_variance_ratio, best_k, best_model = 0, 0, None
             K = range(2, max_clusters +
-                        1) if n_clusters == None else [n_clusters]
+                      1) if n_clusters is None else [n_clusters]
 
             # Either autoselect least varying K-Means model or use specified k
             for k in K:
@@ -565,19 +622,20 @@ class Groups:
             return best_k, best_model, best_variance_ratio
 
         if use_features:
-            if n_PC == None:
+            if n_PC is None:
                 scaler = preprocessing.MaxAbsScaler()
                 features = all_features.to_numpy()
-                COLUMN_NAMES = ['normalized_'+itr for itr in _ALL_FEATURE_NAMES]
+                COLUMN_NAMES = ['normalized_' +
+                                itr for itr in _ALL_FEATURE_NAMES]
                 df = DataFrame(scaler.fit(features).transform(features),
                                columns=COLUMN_NAMES)
             else:
                 raise ValueError('Cannot use morphological features & n_PC '
-                                    'simultaneously')
+                                 'simultaneously')
         else:
             if not hasattr(self, 'projected'):
                 raise RuntimeError('Principal Components must be found before '
-                                    'clustering in their feature space.')
+                                   'clustering in their feature space.')
 
             projected = self.projected
 
@@ -612,7 +670,7 @@ class Groups:
         def parallel_plot(data):
             plt.figure(figsize=(15, 8)).gca().axes.set_ylim([-3, 3])
             parallel_coordinates(data, 'cluster',
-                                    color=LABEL_COLOR_MAP, marker='o')
+                                 color=LABEL_COLOR_MAP, marker='o')
             plt.xticks(rotation=90)
 
         def scatter_plot(data, centers):
@@ -634,11 +692,10 @@ class Groups:
 
                 plt.xlabel('PC1'), plt.ylabel('PC2')
                 plt.legend(title='Groups')
-                plt.show()
             elif data.shape[1] == 3:  # ipyvolume 3D scatter plot
                 # assuming 2 classes: stab & ctrl
                 MARKERS = cycle(['box', 'sphere', 'arrow', 'point_2d',
-                                    'square_2d', 'triangle_2d', 'circle_2d'])
+                                 'square_2d', 'triangle_2d', 'circle_2d'])
                 ipv.figure()
                 ipv.scatter(centers[:, 0], centers[:, 1], centers[:, 2],
                             LABEL_COLOR_MAP, 5, 5.6, marker='diamond')
@@ -653,12 +710,12 @@ class Groups:
                 ipv.xyzlabel('PC1', 'PC2', 'PC3')
                 ipv.show()
 
-        if plot != None:
+        if plot is not None:
             if plot == 'parallel':
                 parallel_plot(centers_df)
             elif plot == 'scatter':
                 scatter_plot(normalized_feature_vector,
-                                kmeans_model.cluster_centers_)
+                             kmeans_model.cluster_centers_)
 
         print(f'k = {k} clusters (0, ..., {k})',
               f'with Variance Ratio = {variance_ratio}')
@@ -666,7 +723,6 @@ class Groups:
         print('Using', ('principal components',
                         'morphometric features')[use_features])
 
-        n_groups = len(group_cnts)
         group_cnts.insert(0, 0)
         group_pos = np.cumsum(group_cnts)
 
@@ -678,7 +734,7 @@ class Groups:
                 continue
             dist_msg = f'- {self.labels[idx - 1]} has '
             l_pos = group_pos[idx - 1]
-            group_cluster_dist = df['cluster'][l_pos : r_pos].value_counts()
+            group_cluster_dist = df['cluster'][l_pos: r_pos].value_counts()
             for i, j in enumerate(group_cluster_dist):
                 dist_msg += f'{j} cells in Cluster {i}{(".", ",")[i < k-1]} '
             print(dist_msg)

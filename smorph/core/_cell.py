@@ -19,6 +19,9 @@ class Cell:
     image_type : str
         Neuroimaging technique used to get image data of neuronal cell,
         either 'confocal' or 'DAB'.
+    crop_tech : str
+        Technique used to crop cell from tissue image,
+        either 'manual' or 'auto', by default 'manual'.
     reference_image : ndarray
         `image` would be standardized to the exposure level of this example.
     shell_step_size : int, optional
@@ -53,12 +56,20 @@ class Cell:
                  '_sholl_polynomial_model', '_polynomial_sholl_radii',
                  '_non_zero_sholl_radii', '_non_zero_sholl_intersections')
 
-    def __init__(self, cell_image, image_type, reference_image=None, shell_step_size=3, polynomial_degree=3):
+    def __init__(
+        self,
+        cell_image,
+        image_type,
+        crop_tech='manual',
+        reference_image=None,
+        shell_step_size=3,
+        polynomial_degree=3
+    ):
         self.image = (cell_image if cell_image.ndim == 2
                       else rgb2gray(cell_image))
         self.image_type = image_type
         self.cleaned_image = preprocess_image(
-            self.image, image_type, reference_image)
+            self.image, image_type, reference_image, crop_tech)
         self.features = _extract_cell_features(
             self, shell_step_size, polynomial_degree)
 
@@ -95,7 +106,7 @@ class Cell:
         plt.tight_layout()
         plt.show()
 
-    def plot_branching_structure(self, colors=['r','b','m','g','c']):
+    def plot_branching_structure(self, colors=['r', 'b', 'm', 'g', 'c']):
         """Plots skeleton of the cell with all levels of branching highlighted.
 
         Parameters
@@ -110,7 +121,7 @@ class Cell:
         if sum(color_validations) != len(color_validations):
             print(f'{colors} is not a valid list of colors. '
                   'Resetting colors to ["r","b","m","g","c"].')
-            colors = ['r','b','m','g','c']
+            colors = ['r', 'b', 'm', 'g', 'c']
 
         branching_structure = self._branching_structure
         coords = self._branch_coords

@@ -35,6 +35,7 @@ def read_groups_folders(groups_folders):
 
     return file_names, dataset
 
+
 def df_to_csv(df, folder, out_file_name):
     """Export DataFrame to a CSV file.
 
@@ -54,6 +55,7 @@ def df_to_csv(df, folder, out_file_name):
     mkdir(DIR)
 
     df.to_csv(DIR + out_file_name, index=False, mode='w')
+
 
 def dict_to_pickle(data, folder, out_file_name):
     """Export a Python dictionary to a pickle file.

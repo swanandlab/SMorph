@@ -9,7 +9,7 @@ from skimage.transform import match_histograms  # TODO:0.18 moved to exposure
 from skimage.util import invert
 
 
-def preprocess_image(image, image_type, reference_image):
+def preprocess_image(image, image_type, reference_image, crop_tech='manual'):
     """Extract the individual cell by thresholding & removing background noise.
 
     Parameters
@@ -21,6 +21,9 @@ def preprocess_image(image, image_type, reference_image):
         either 'confocal' or 'DAB'.
     reference_image : ndarray
         `image` would be standardized to the exposure level of this example.
+    crop_tech : str
+        Technique used to crop cell from tissue image,
+        either 'manual' or 'auto', by default 'manual'.
 
     Returns
     -------
@@ -29,13 +32,14 @@ def preprocess_image(image, image_type, reference_image):
         soma.
 
     """
-    thresholded_image = _threshold_image(image, image_type, reference_image)
+    thresholded_image = _threshold_image(image, image_type,
+                                         reference_image, crop_tech)
     cleaned_image = _remove_small_object_noise(thresholded_image)
     cleaned_image_filled_holes = _fill_holes(cleaned_image)
     return cleaned_image_filled_holes
 
 
-def _threshold_image(image, image_type, reference_image):
+def _threshold_image(image, image_type, reference_image, crop_tech):
     """Single intensity threshold via Otsu's method."""
     if reference_image is not None:
         gray_reference_image = rgb2gray(reference_image)
@@ -45,7 +49,10 @@ def _threshold_image(image, image_type, reference_image):
     p2, p98 = np.percentile(image, (2, 98))
     img_rescale = rescale_intensity(image, in_range=(p2, p98))
 
-    thresholded_cell = img_rescale > threshold_otsu(img_rescale)
+    if crop_tech == 'manual':
+        thresholded_cell = img_rescale > threshold_otsu(img_rescale)
+    else:
+        thresholded_cell = image > 0
 
     if image_type == "DAB":
         return thresholded_cell

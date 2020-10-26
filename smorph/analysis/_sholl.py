@@ -6,7 +6,14 @@ from sklearn.preprocessing import PolynomialFeatures
 from scipy.stats import skew
 
 
-def sholl_analysis(shell_step_size, polynomial_degree, largest_radius, padded_skeleton, pad_sk_soma, n_primary_branches):
+def sholl_analysis(
+    shell_step_size,
+    polynomial_degree,
+    largest_radius,
+    padded_skeleton,
+    pad_sk_soma,
+    n_primary_branches
+):
     concentric_coords, radii, n_intersections = get_intersections(
         shell_step_size, padded_skeleton, pad_sk_soma, largest_radius)
 
@@ -83,15 +90,21 @@ def sholl_analysis(shell_step_size, polynomial_degree, largest_radius, padded_sk
     )
 
 
-def _concentric_coords_and_values(shell_step_size, padded_skeleton, pad_sk_soma, largest_radius):
-    # concentric_coordinates: {radius values: [pixel coordinates on that radius]}
+def _concentric_coords_and_values(
+    shell_step_size,
+    padded_skeleton,
+    pad_sk_soma,
+    largest_radius
+):
+    # concentric_coordinates: {radius values: [coords on that radius]}
     # n_intersections: {radius values: n_intersection values}
 
     # {100: [(10,10), ..] , 400: [(20,20), ..]}
     concentric_coordinates = defaultdict(list)
     concentric_coordinates_intensities = defaultdict(list)
-    concentric_radiuses = [radius for radius in range(
-        shell_step_size, largest_radius, shell_step_size)]
+    concentric_radiuses = [
+        radius for radius in range(shell_step_size,
+                                   largest_radius, shell_step_size)]
 
     for (x, y), value in np.ndenumerate(padded_skeleton):
         for radius in concentric_radiuses:
@@ -117,7 +130,12 @@ def _concentric_coords_and_values(shell_step_size, padded_skeleton, pad_sk_soma,
     return concentric_coordinates, n_intersections
 
 
-def get_intersections(shell_step_size, padded_skeleton, pad_sk_soma, largest_radius):
+def get_intersections(
+    shell_step_size,
+    padded_skeleton,
+    pad_sk_soma,
+    largest_radius
+):
     # return sholl radii and corresponding intersection values
     xs, ys = [], []
     concentric_coords, n_intersections = _concentric_coords_and_values(
@@ -164,11 +182,12 @@ def polynomial_fit(polynomial_degree, radii, n_intersections):
 
 def get_enclosing_radius(non_zero_radii, non_zero_n_intersections):
     """Index of last non-zero value in the array containing radii."""
-    return non_zero_radii[len(non_zero_n_intersections) - (non_zero_n_intersections != 0)[::-1].argmax() - 1]
+    n_intersected_circles = len(non_zero_n_intersections)
+    enclosing_circle = (non_zero_n_intersections != 0)[::-1].argmax()
+    return non_zero_radii[n_intersected_circles - enclosing_circle - 1]
 
 
 def get_critical_radius(non_zero_radii, predicted_n_intersections):
-    # radii_array[index of the max value in the array for n_intersections (polynomial plot)]
     return non_zero_radii[np.argmax(predicted_n_intersections)]
 
 
@@ -177,7 +196,11 @@ def get_critical_value(predicted_n_intersections):
     return round(np.max(predicted_n_intersections), 2)
 
 
-def get_skewness(polynomial_model, polynomial_degree, non_zero_n_intersections):
+def get_skewness(
+    polynomial_model,
+    polynomial_degree,
+    non_zero_n_intersections
+):
     # Indication of how symmetrical polynomial distribution is around its mean.
     reshaped_x = non_zero_n_intersections.reshape((-1, 1))
     x_ = PolynomialFeatures(
@@ -237,7 +260,11 @@ def get_coefficient_of_determination(norm_mthd, semi_log_r2, log_log_r2):
         return round(log_log_r2, 2)
 
 
-def get_regression_intercept(norm_mthd, semi_log_regression_intercept, log_log_regression_intercept):
+def get_regression_intercept(
+    norm_mthd,
+    semi_log_regression_intercept,
+    log_log_regression_intercept
+):
     # Y intercept of the logarithmic plot
     if norm_mthd == "Semi-log":
         return round(semi_log_regression_intercept, 2)
@@ -245,7 +272,11 @@ def get_regression_intercept(norm_mthd, semi_log_regression_intercept, log_log_r
         return round(log_log_regression_intercept, 2)
 
 
-def get_sholl_regression_coeff(norm_mthd, semi_log_regression_coeff, log_log_regression_coeff):
+def get_sholl_regression_coeff(
+    norm_mthd,
+    semi_log_regression_coeff,
+    log_log_regression_coeff
+):
     """Rate of decay of no. of branches."""
     if norm_mthd == "Semi-log":
         return round(semi_log_regression_coeff, 2)
