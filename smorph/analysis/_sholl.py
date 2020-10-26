@@ -136,8 +136,12 @@ def polynomial_fit(polynomial_degree, radii, n_intersections):
 
     # till last non-zero value
     last_intersection_index = np.max(np.nonzero(n_intersections))
-    non_zero_n_intersections = n_intersections[:last_intersection_index]
-    non_zero_radii = radii[:last_intersection_index]
+
+    if last_intersection_index == 0:
+        raise ValueError('Sholl analysis found no branch intersections!')
+
+    non_zero_n_intersections = n_intersections[:last_intersection_index+1]
+    non_zero_radii = radii[:last_intersection_index+1]
 
     y_data = non_zero_n_intersections
     reshaped_x = non_zero_radii.reshape((-1, 1))

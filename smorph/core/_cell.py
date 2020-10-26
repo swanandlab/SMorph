@@ -183,14 +183,14 @@ class Cell:
 
     def plot_polynomial_fit(self):
         """Plots original & estimated no. of intersections vs. Sholl radii.
-        
+
         Plots polynomial regression curve describing the relationship between
         no. of intersections vs. Sholl radii, & observed values from the cell
         skeleton.
 
         """
         last_intersection_idx = np.max(np.nonzero(self._sholl_intersections))
-        non_zero_radii = self._sholl_radii[:last_intersection_idx]
+        non_zero_radii = self._sholl_radii[:last_intersection_idx+1]
         x_ = self._polynomial_sholl_radii
         y_data = self._non_zero_sholl_intersections
         # predict y from the data
