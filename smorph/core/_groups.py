@@ -46,6 +46,7 @@ def _analyze_cells(
     img_type,
     groups_crop_tech,
     shell_step_sz,
+    poly_degree,
     save_features,
     show_logs
 ):
@@ -65,6 +66,9 @@ def _analyze_cells(
         same cropping technique)
     shell_step_sz : int
         Difference (in pixels) between concentric Sholl circles, by default 3
+    poly_degree : int, optional
+        Degree of polynomial for fitting regression model on sholl values, by
+        default 3
     save_features : bool
         To save the features into a file.
     show_logs : bool
@@ -103,7 +107,7 @@ def _analyze_cells(
 
     if groups_crop_tech is None:
         groups_crop_tech = ['manual' for i in range(N_GROUPS)]
-    
+
     if type(groups_crop_tech) == str:
         groups_crop_tech = [groups_crop_tech for i in range(N_GROUPS)]
 
@@ -117,7 +121,8 @@ def _analyze_cells(
             try:
                 cell = Cell(cell_image, img_type,
                             crop_tech=groups_crop_tech[group_no],
-                            shell_step_size=shell_step_sz)
+                            shell_step_size=shell_step_sz,
+                            polynomial_degree=poly_degree)
                 cell_features = list(cell.features.values())
                 group_cell_cnt += 1
 
@@ -134,7 +139,7 @@ def _analyze_cells(
             except Exception as err:
                 bad_cells_idx.append(cell_cnt - 1)
                 print('Warning: Skipping analysis of',
-                      f'"{file_names[cell_cnt]}" due to {err}.')
+                      f'"{file_names[cell_cnt - 1]}" due to {err}.')
 
         group_cnts.append(group_cell_cnt)
 
@@ -177,6 +182,9 @@ class Groups:
         Group labels to be used for visualization. Specify for each group.
     shell_step_size : int, optional
         Difference (in pixels) between concentric Sholl circles, by default 3
+    polynomial_degree : int, optional
+        Degree of polynomial for fitting regression model on sholl values, by
+        default 3
     save_features : bool, optional
         To save a file containing morphometric features of each cell,
         by default True
@@ -226,6 +234,7 @@ class Groups:
         groups_crop_tech,
         labels,
         shell_step_size=3,
+        polynomial_degree=3,
         save_features=True,
         show_logs=False
     ):
@@ -240,7 +249,8 @@ class Groups:
             self.group_counts,
             self.file_names
         ) = _analyze_cells(groups_folders, image_type, groups_crop_tech,
-                           shell_step_size, save_features, show_logs)
+                           shell_step_size, polynomial_degree, save_features,
+                           show_logs)
 
         self.pca_feature_names = None
         self.markers = None
@@ -687,7 +697,7 @@ class Groups:
                     r_idx += cells
                     plt.scatter(data[l_idx:r_idx, 0], data[l_idx:r_idx, 1], 40,
                                 label_color[l_idx:r_idx], next(markers),
-                                label=next(labels), alpha=.9)
+                                label=next(labels), alpha=.75)
                     l_idx += cells
 
                 plt.xlabel('PC1'), plt.ylabel('PC2')
