@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import skimage.io as io
 import tifffile
-from aicsimageio.readers import CziReader
+import czifile
 from psutil import virtual_memory
 from scipy.spatial import ConvexHull
 from skimage import img_as_float, img_as_ubyte
@@ -59,7 +59,7 @@ def import_confocal_image(img_path):
     """
     # image has to be converted to float for processing
     if img_path.split('.')[-1] == 'czi':
-        img = CziReader(img_path)
+        img = czifile.imread(img_path)
         img = img.data
         img = img_as_float(np.squeeze(img)[0])
     else:
@@ -109,14 +109,12 @@ def denoise(img, denoise_parameters):
     -------
     ndarray
         Denoised image data.
+
     """
     denoised = np.zeros(img.shape)
 
     for i in range(denoised.shape[0]):
         denoised[i] = denoise_nl_means(img[i], **denoise_parameters)
-
-    for i in range(denoised.shape[1]):
-        denoised[:, i] = denoise_nl_means(denoised[:, i], **denoise_parameters)
 
     return denoised
 
