@@ -20,7 +20,7 @@ from skimage.util import unique_rows
 
 
 def projectXYZ(img, voxel_sz_x, voxel_sz_y, voxel_sz_z, cmap='gray'):
-    """Projects image in all planes.
+    """Projects a 3D image in all planes.
 
     Parameters
     ----------
