@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import skimage.io as io
 import tifffile
-from aicsimageio.readers import CziReader
+import czifile
 from psutil import virtual_memory
 from scipy.spatial import ConvexHull
 from skimage import img_as_float, img_as_ubyte
@@ -59,7 +59,7 @@ def import_confocal_image(img_path):
     """
     # image has to be converted to float for processing
     if img_path.split('.')[-1] == 'czi':
-        img = CziReader(img_path)
+        img = czifile.imread(img_path)
         img = img.data
         img = img_as_float(np.squeeze(img)[0])
     else:
@@ -91,7 +91,8 @@ def calibrate_nlm_denoiser(img):
                         'patch_size': np.arange(2, 6),
                         'patch_distance': np.arange(2, 6)}
 
-    denoiser = calibrate_denoiser(img_max_projection, denoise_nl_means, parameter_ranges)
+    denoiser = calibrate_denoiser(img_max_projection,
+                                  denoise_nl_means, parameter_ranges)
     return denoiser
 
 
@@ -109,14 +110,12 @@ def denoise(img, denoise_parameters):
     -------
     ndarray
         Denoised image data.
+
     """
     denoised = np.zeros(img.shape)
 
     for i in range(denoised.shape[0]):
         denoised[i] = denoise_nl_means(img[i], **denoise_parameters)
-
-    for i in range(denoised.shape[1]):
-        denoised[:, i] = denoise_nl_means(denoised[:, i], **denoise_parameters)
 
     return denoised
 
@@ -148,12 +147,14 @@ def _check_coords_in_hull(gridcoords, hull_equations, tolerance):
 
     available_mem = .75 * virtual_memory().available
     required_mem = 96 + n_hull_equations * n_gridcoords * 8
-    chunk_size = int(required_mem // available_mem) if available_mem < required_mem else n_gridcoords
+    chunk_size = (int(required_mem // available_mem)
+                  if available_mem < required_mem else n_gridcoords)
 
     # Pre-allocate arrays to cache intermediate results for reducing overheads
     dot_array = np.zeros((n_hull_equations, chunk_size))
     test_ineq_temp = np.zeros((n_hull_equations, chunk_size))
-    coords_chunk_ineq = np.zeros((n_hull_equations, chunk_size), dtype=np.bool_)
+    coords_chunk_ineq = np.zeros((n_hull_equations, chunk_size),
+                                 dtype=np.bool_)
     coords_all_ineq = np.zeros(chunk_size, dtype=np.bool_)
 
     # Apply the test in chunks
@@ -200,16 +201,19 @@ def compute_convex_hull(thresholded, tolerance=1e-10):
     hull = ConvexHull(coords)
     vertices = hull.points[hull.vertices]
 
-    gridcoords = np.reshape(np.mgrid[tuple(map(slice, surface.shape))], (ndim, -1))
+    gridcoords = np.reshape(np.mgrid[tuple(map(slice, surface.shape))],
+                            (ndim, -1))
     # A point is in the hull if it satisfies all of the hull's inequalities
-    coords_in_hull = _check_coords_in_hull(gridcoords, hull.equations, tolerance)
+    coords_in_hull = _check_coords_in_hull(gridcoords,
+                                           hull.equations, tolerance)
     mask = np.reshape(coords_in_hull, surface.shape)
 
     return mask
 
 
 def filter_labels(labels, convex_hull):
-    filtered_labels = clear_border(clear_border(labels), mask=binary_erosion(convex_hull))
+    filtered_labels = clear_border(clear_border(labels),
+                                   mask=binary_erosion(convex_hull))
     return filtered_labels
 
 
@@ -219,7 +223,28 @@ def arrange_regions(filtered_labels):
     return regions
 
 
-def project_batch(BATCH_NO, N_BATCHES, N_OBJECTS, regions, denoised):
+def paginate_objs(regions, pg_size=50):
+    N_OBJECTS = len(regions)
+    print(f'{N_OBJECTS} objects detected.')
+    N_BATCHES = N_OBJECTS // pg_size + (N_OBJECTS % pg_size > 0)
+    print(f'There will be {N_BATCHES} batches, set `BATCH_NO` '
+          f'from 0 to {N_BATCHES-1} inclusive')
+    return N_BATCHES
+
+
+def extract_obj(region, denoised):
+    minz, miny, minx, maxz, maxy, maxx = region.bbox
+
+    extracted_obj = denoised[minz:maxz, miny:maxy, minx:maxx].copy()
+    extracted_obj[~region.filled_image] = 0.0
+
+    print(f'Volume of this object is: {region.area}')
+    return extracted_obj
+
+
+def project_batch(BATCH_NO, N_BATCHES, regions, denoised):
+    N_OBJECTS = len(regions)
+
     if BATCH_NO >= N_BATCHES:
         raise ValueError(f'BATCH_NO should only be from 0 to {N_BATCHES-1}!')
 
@@ -243,18 +268,25 @@ def project_batch(BATCH_NO, N_BATCHES, N_OBJECTS, regions, denoised):
         plt.imshow(np.max(extracted_cell, 0), cmap='gray')
 
 
-def export_cells(img_path, low_vol_cutoff, hi_vol_cutoff, output_option, denoised, regions):
-    OUTPUT_TYPE = ('3D', 'MIP')[output_option]
+def export_cells(
+    img_path,
+    low_vol_cutoff,
+    hi_vol_cutoff,
+    output_option,
+    denoised,
+    regions
+):
+    OUT_TYPE = ('3D', 'MIP')[output_option]
 
     DIR = getcwd() + '/autocropped/'
     if not (path.exists(DIR) and path.isdir(DIR)):
         mkdir(DIR)
 
     IMAGE_NAME = path.basename(img_path).split('.')[0]
-    OUTPUT_DIR = DIR + IMAGE_NAME + f'_{OUTPUT_TYPE}/'
-    if path.exists(OUTPUT_DIR) and path.isdir(OUTPUT_DIR):
-        rmtree(OUTPUT_DIR)
-    mkdir(OUTPUT_DIR)
+    OUT_DIR = DIR + IMAGE_NAME + f'_{OUT_TYPE}/'
+    if path.exists(OUT_DIR) and path.isdir(OUT_DIR):
+        rmtree(OUT_DIR)
+    mkdir(OUT_DIR)
 
     if img_path.split('.')[-1] == 'tif':
         with tifffile.TiffFile(img_path) as file:
@@ -271,10 +303,12 @@ def export_cells(img_path, low_vol_cutoff, hi_vol_cutoff, output_option, denoise
         if low_vol_cutoff < region.area < hi_vol_cutoff:
             minz, miny, minx, maxz, maxy, maxx = region.bbox
 
-            segmented = img_as_ubyte(denoised[minz:maxz, miny:maxy, minx:maxx].copy())
+            segmented = denoised[minz:maxz, miny:maxy, minx:maxx].copy()
+            segmented = img_as_ubyte(segmented)
             segmented[~region.filled_image] = 0
 
-            out_data = segmented if OUTPUT_TYPE == '3D' else np.max(segmented, 0)
+            out = segmented if OUT_TYPE == '3D' else np.max(segmented, 0)
 
-            name = f'{OUTPUT_DIR}cell{obj}-{minz},{maxz},{miny},{maxy},{minx},{maxx}.tif'
-            tifffile.imsave(name, out_data, description=cell_metadata)
+            name = (f'{OUT_DIR}cell{obj}-({minx},{miny},{minz}),'
+                    f'({maxx},{maxy},{maxz}).tif')
+            tifffile.imsave(name, out, description=cell_metadata)

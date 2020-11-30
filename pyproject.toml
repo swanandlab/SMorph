@@ -5,11 +5,11 @@ description = "A library for rapid analysis of the morphology of cells of the ne
 authors = ["Parul Sethi <parul1sethi@gmail.com>", "Kushaan Gupta <gkushaan@rediffmail.com>"]
 
 [tool.poetry.dependencies]
-python = "^3.7"
+python = "^3.6.1"
 jupyter = "^1.0.0"
-matplotlib = "^3.3.2"
+matplotlib = "^3.2.2"
 networkx = "^2.5"
-numpy = "^1.19.2"
+numpy = "^1.18.5"
 scikit-image = "^0.17.2"
 scikit-learn = "^0.23.2"
 scipy = "^1.5.2"
@@ -18,7 +18,9 @@ numba = "^0.51.2"
 pandas = "^1.1.2"
 seaborn = "^0.11.0"
 ipyvolume = "^0.5.2"
-napari = "^0.4.2"
+napari = "^0.3.8"
+tifffile = "2020.9.3"
+czifile = "^2019.7.2"
 
 [tool.poetry.dev-dependencies]
 

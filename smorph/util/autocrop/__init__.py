@@ -9,6 +9,8 @@ from .core import (
     compute_convex_hull,
     filter_labels,
     arrange_regions,
+    paginate_objs,
+    extract_obj,
     project_batch,
     export_cells
 )
