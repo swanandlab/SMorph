@@ -361,6 +361,10 @@ class Groups:
 
         Returns
         -------
+        feature_significance : ndarray
+            Eigenvectors of each Principal Component.
+        covariance_matix : ndarray
+            Data covariance computed via generative model.
         var_PCs : ndarray
             Captured variance ratios of each Principal Component.
 
@@ -438,6 +442,20 @@ class Groups:
             pca_values = DataFrame(data=projected, columns=PC_COLUMN_NAMES)
             df_to_csv(pca_values, '/PCA Results/', 'pca_values.csv')
 
+        fig, axes = plt.subplots(ncols=2, nrows=1, figsize=(8, 4))
+
+        axes[0].plot(pca_object.explained_variance_ratio_, '-o')
+        axes[0].set_xlabel('Principal Component')
+        axes[0].set_ylabel('Proportion of Variance Explained')
+        axes[0].title.set_text('Scree Plot')
+        axes[1].plot(pca_object.explained_variance_ratio_.cumsum(), '-o')
+        axes[1].set_xlabel('Principal Component')
+        axes[1].set_ylabel('Cumulative Proportion of Variance Explained')
+        axes[1].title.set_text('Cumulative Scree Plot')
+        plt.ylim(0, 1)
+        fig.tight_layout()
+        plt.show()
+
         def visualize_two_PCs():
             n_std = 3  # no. of standard deviations to show
             fig, ax = plt.subplots()
@@ -453,6 +471,7 @@ class Groups:
                                     n_std, fc=color_dict[l], alpha=0.4)
                 ax.add_artist(e)
 
+            plt.title('First two Principal Components')
             plt.xlabel(f'PC 1 (Variance: {var_PCs[0]*100:.1f})', fontsize=14)
             plt.ylabel(f'PC 2 (Variance: {var_PCs[1]*100:.1f})', fontsize=14)
             plt.legend(title='Groups')
@@ -462,8 +481,10 @@ class Groups:
 
         self.feature_significance = feature_significance
         self.projected = projected
+        feature_significance = pca_object.components_
+        covariance_matix = pca_object.get_covariance()
 
-        return var_PCs
+        return feature_significance, covariance_matix, var_PCs
 
     def plot_feature_histograms(self, features=list(_ALL_FEATURE_NAMES)):
         """Plots feature significance heatmap.
