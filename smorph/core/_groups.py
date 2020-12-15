@@ -45,6 +45,8 @@ def _analyze_cells(
     groups_folders,
     img_type,
     groups_crop_tech,
+    contrast_ptiles,
+    threshold_method,
     shell_step_sz,
     poly_degree,
     save_features,
@@ -64,6 +66,16 @@ def _analyze_cells(
         image, elements can be either 'manual' or 'auto', by default 'manual'
         for all groups. (Assumes all images in a group are captured via the
         same cropping technique)
+    contrast_ptiles : tuple of size 2
+        `(low_percentile, hi_percentile)` Contains ends of band of percentile
+        values for pixel intensities to which the contrast of all cell images
+        would be stretched.
+    threshold_method : str or None, optional
+        Automatic single intensity thresholding method to be used for
+        obtaining ROI from cell images either of 'otsu', 'isodata', 'li',
+        'mean', 'minimum', 'triangle', 'yen'. If None & crop_tech is 'auto' &
+        contrast stretch is (0, 100), a single intensity threshold of zero is
+        applied, by default 'otsu'
     shell_step_sz : int
         Difference (in pixels) between concentric Sholl circles, by default 3
     poly_degree : int, optional
@@ -121,6 +133,8 @@ def _analyze_cells(
             try:
                 cell = Cell(cell_image, img_type,
                             crop_tech=groups_crop_tech[group_no],
+                            contrast_ptiles=contrast_ptiles,
+                            threshold_method=threshold_method,
                             shell_step_size=shell_step_sz,
                             polynomial_degree=poly_degree)
                 cell_features = list(cell.features.values())
@@ -128,12 +142,10 @@ def _analyze_cells(
 
                 targets.append(group_no)
 
-                sholl_original_plots.append(
-                    (cell._sholl_radii, cell._sholl_intersections))
+                sholl_original_plots.append(cell._sholl_intersections)
 
-                sholl_polynomial_plots.append((
-                    cell._non_zero_sholl_radii,
-                    cell._non_zero_sholl_intersections))
+                sholl_polynomial_plots.append(
+                    cell._non_zero_sholl_intersections)
 
                 dataset_features.append(cell_features)
             except Exception as err:
@@ -147,7 +159,7 @@ def _analyze_cells(
                   if idx not in bad_cells_idx]
     features = DataFrame(dataset_features, columns=_ALL_FEATURE_NAMES)
 
-    if save_features == True:
+    if save_features:
         FEATURES_DIR, FEATURES_FILE_NAME = '/Features/', 'features.csv'
         out_features = features.copy()
         out_features.insert(0, 'cell_image_file', file_names)
@@ -180,6 +192,16 @@ class Groups:
         via the same cropping technique)
     labels : dict
         Group labels to be used for visualization. Specify for each group.
+    contrast_ptiles : tuple of size 2, optional
+        `(low_percentile, hi_percentile)` Contains ends of band of percentile
+        values for pixel intensities to which the contrast of all cell images
+        would be stretched, by default (0, 100)
+    threshold_method : str or None, optional
+        Automatic single intensity thresholding method to be used for
+        obtaining ROI from cell images either of 'otsu', 'isodata', 'li',
+        'mean', 'minimum', 'triangle', 'yen'. If None & crop_tech is 'auto' &
+        contrast stretch is (0, 100), a single intensity threshold of zero is
+        applied, by default 'otsu'
     shell_step_size : int, optional
         Difference (in pixels) between concentric Sholl circles, by default 3
     polynomial_degree : int, optional
@@ -233,6 +255,8 @@ class Groups:
         image_type,
         groups_crop_tech,
         labels,
+        contrast_ptiles=(0, 100),
+        threshold_method='otsu',
         shell_step_size=3,
         polynomial_degree=3,
         save_features=True,
@@ -249,8 +273,8 @@ class Groups:
             self.group_counts,
             self.file_names
         ) = _analyze_cells(groups_folders, image_type, groups_crop_tech,
-                           shell_step_size, polynomial_degree, save_features,
-                           show_logs)
+                           contrast_ptiles, threshold_method, shell_step_size,
+                           polynomial_degree, save_features, show_logs)
 
         self.pca_feature_names = None
         self.markers = None
@@ -264,64 +288,49 @@ class Groups:
         save_results : bool, optional
             To save a file containing Sholl Plots for each cell,
             by default True
-        """
-        ANALYSES = ['single_cell_intersections', 'group_cells_intersections']
-        SINGLE_CELL_INTERSECTIONS = ['original_plot', 'polynomial_plot']
 
-        largest_radius = []
-        no_of_intersections = []
-        write_buffer = {ANALYSES[0]: {}, ANALYSES[1]: {}}
+        """
         file_names = self.file_names
-        shell_step_size = self.shell_step_size
-        original_plots = self.sholl_original_plots
-        polynomial_plots = self.sholl_polynomial_plots
+        shell_step_sz = self.shell_step_size
+        polynomial_plots = list(map(lambda x: list(x),
+                                    self.sholl_polynomial_plots))
         group_cnts = self.group_counts
         labels = self.labels
 
-        for index in range(len(file_names)):
-            write_buffer[ANALYSES[0]][file_names[index]] = {
-                SINGLE_CELL_INTERSECTIONS[0]: original_plots[index],
-                SINGLE_CELL_INTERSECTIONS[1]: polynomial_plots[index]}
+        len_polynomial_plots = max(map(len, polynomial_plots))
 
-            # get the max radius of each cell, as smallest and
-            # mid-level ones can be inferred from shell_step_size
-            largest_radius.append(max(polynomial_plots[index][0]))
-            no_of_intersections.append(polynomial_plots[index][1])
+        polynomial_plots = np.array([
+            x+[0]*(len_polynomial_plots-len(x)) for x in polynomial_plots])
 
-        for group_no, cnt in enumerate(group_cnts):
-            group_cnt = sum(group_cnts[:group_no+1])
-            group_radius = max(largest_radius[group_cnt-cnt:group_cnt])
+        x = list(range(shell_step_sz,
+                       shell_step_sz * len_polynomial_plots + 1,
+                       shell_step_sz))
 
-            current_intersections = no_of_intersections[group_cnt -
-                                                        cnt:group_cnt]
-            current_radiuses = range(
-                shell_step_size, group_radius+1, shell_step_size)
-
-            intersection_dict = defaultdict(list)
-            for intersections in current_intersections:
-                for i, intersection_val in enumerate(intersections):
-                    intersection_dict[current_radiuses[i]].append(
-                        intersection_val)
-            write_buffer[ANALYSES[1]][group_no] = intersection_dict
-
-        if save_results:
-            DIR, OUTFILE = '/Sholl Results/', 'sholl_results.pickle'
-            dict_to_pickle(write_buffer, DIR, OUTFILE)
-
-        for group_no, group_sholl in write_buffer[ANALYSES[1]].items():
-            x, y, e = [], [], []
-            for radius, intersections in group_sholl.items():
-                x.append(radius)
-                intersections += group_cnts[group_no] * [0]
-                intersections = intersections[:group_cnts[group_no]]
-                y.append(np.mean(intersections))
-                e.append(sem(intersections))
+        lft_idx = 0
+        for group_no, group_cnt in enumerate(group_cnts):
+            y = np.mean(polynomial_plots[lft_idx: lft_idx + group_cnt],
+                        axis=0)
+            e = sem(polynomial_plots[lft_idx: lft_idx + group_cnt], axis=0)
+            lft_idx += group_cnt
             plt.errorbar(x, y, yerr=e, label=labels[group_no])
 
         plt.xlabel("Distance from soma")
         plt.ylabel("No. of intersections")
         plt.legend()
         plt.show()
+
+        if save_results:
+            # single_cell_intersections
+            DIR, OUTFILE = '/Sholl Results/', 'sholl_intersections.csv'
+            cols = list(range(shell_step_sz,
+                              (len_polynomial_plots + 1) * shell_step_sz,
+                              shell_step_sz))
+
+            write_buffer = DataFrame(file_names, columns=['file_name'])
+            df_polynomial_plots = DataFrame(polynomial_plots, columns=cols)
+            write_buffer[df_polynomial_plots.columns] = df_polynomial_plots
+            df_to_csv(write_buffer, DIR, OUTFILE)
+
 
     def pca(
         self,
@@ -352,6 +361,10 @@ class Groups:
 
         Returns
         -------
+        feature_significance : ndarray
+            Eigenvectors of each Principal Component.
+        covariance_matix : ndarray
+            Data covariance computed via generative model.
         var_PCs : ndarray
             Captured variance ratios of each Principal Component.
 
@@ -427,7 +440,21 @@ class Groups:
         if save_results:
             PC_COLUMN_NAMES = [f'PC {itr + 1}' for itr in range(n_PC)]
             pca_values = DataFrame(data=projected, columns=PC_COLUMN_NAMES)
-            df_to_csv(pca_values, '/PCA Results/', 'pca values.csv')
+            df_to_csv(pca_values, '/PCA Results/', 'pca_values.csv')
+
+        fig, axes = plt.subplots(ncols=2, nrows=1, figsize=(8, 4))
+
+        axes[0].plot(pca_object.explained_variance_ratio_, '-o')
+        axes[0].set_xlabel('Principal Component')
+        axes[0].set_ylabel('Proportion of Variance Explained')
+        axes[0].title.set_text('Scree Plot')
+        axes[1].plot(pca_object.explained_variance_ratio_.cumsum(), '-o')
+        axes[1].set_xlabel('Principal Component')
+        axes[1].set_ylabel('Cumulative Proportion of Variance Explained')
+        axes[1].title.set_text('Cumulative Scree Plot')
+        plt.ylim(0, 1)
+        fig.tight_layout()
+        plt.show()
 
         def visualize_two_PCs():
             n_std = 3  # no. of standard deviations to show
@@ -444,6 +471,7 @@ class Groups:
                                     n_std, fc=color_dict[l], alpha=0.4)
                 ax.add_artist(e)
 
+            plt.title('First two Principal Components')
             plt.xlabel(f'PC 1 (Variance: {var_PCs[0]*100:.1f})', fontsize=14)
             plt.ylabel(f'PC 2 (Variance: {var_PCs[1]*100:.1f})', fontsize=14)
             plt.legend(title='Groups')
@@ -453,8 +481,10 @@ class Groups:
 
         self.feature_significance = feature_significance
         self.projected = projected
+        feature_significance = pca_object.components_
+        covariance_matix = pca_object.get_covariance()
 
-        return var_PCs
+        return feature_significance, covariance_matix, var_PCs
 
     def plot_feature_histograms(self, features=list(_ALL_FEATURE_NAMES)):
         """Plots feature significance heatmap.
@@ -488,7 +518,7 @@ class Groups:
             ax[i].axes.get_xaxis().set_visible(False)
             ax[i].set_yticks(())
 
-        ax[0].legend(self.markers, loc='best', fontsize=8)
+        ax[0].legend(self.labels, loc='best', fontsize=8)
         plt.tight_layout()
         plt.show()
 
@@ -552,15 +582,12 @@ class Groups:
 
         plt.figure(figsize=(10, 9))
         ax = plt.axes()
-        ax.scatter(xs * scale_x, ys * scale_y, c=self.targets, alpha=.9)
+        ax.scatter(xs * scale_x, ys * scale_y, c=self.targets, alpha=.5)
         for i in range(n):
             ax.arrow(0, 0, coeff[i, 0], coeff[i, 1], color='r', alpha=0.5)
-            if labels is None:
-                ax.text(coeff[i, 0] * 1.15, coeff[i, 1] * 1.15,
-                        f'Var{i+1}', color='g', ha='center', va='center')
-            else:
-                ax.text(coeff[i, 0] * 1.15, coeff[i, 1] * 1.15,
-                        labels[i], color='g', ha='center', va='center')
+            ax.text(coeff[i, 0] * 1.15, coeff[i, 1] * 1.15,
+                    f'Var{i+1}' if labels is None else labels[i],
+                    color='g', ha='center', va='center')
         ax.set_xlabel('PC 1')
         ax.set_ylabel('PC 2')
         plt.show()
@@ -596,6 +623,9 @@ class Groups:
         df
             A DataFrame with normalized cell coordinates & the respective
             cluster to which they belong.
+        dist
+            A DataFrame with distribution of cells in the clusters, where the
+            rows represent cluster numbers.
 
         """
         all_features = self.features
@@ -702,6 +732,7 @@ class Groups:
 
                 plt.xlabel('PC1'), plt.ylabel('PC2')
                 plt.legend(title='Groups')
+                plt.show()
             elif data.shape[1] == 3:  # ipyvolume 3D scatter plot
                 # assuming 2 classes: stab & ctrl
                 MARKERS = cycle(['box', 'sphere', 'arrow', 'point_2d',
@@ -737,16 +768,13 @@ class Groups:
         group_pos = np.cumsum(group_cnts)
 
         df['cluster'] = kmeans_model.labels_
+        dist = DataFrame()
 
-        print('Cluster distribution in groups:')
         for idx, r_pos in enumerate(group_pos):
             if idx == 0:
                 continue
-            dist_msg = f'- {self.labels[idx - 1]} has '
             l_pos = group_pos[idx - 1]
-            group_cluster_dist = df['cluster'][l_pos: r_pos].value_counts()
-            for i, j in enumerate(group_cluster_dist):
-                dist_msg += f'{j} cells in Cluster {i}{(".", ",")[i < k-1]} '
-            print(dist_msg)
+            dist[self.labels[idx - 1]] = (
+                df['cluster'][l_pos: r_pos].value_counts())
 
-        return centers_df, df
+        return centers_df, df, dist

@@ -69,7 +69,7 @@ def _extract_cell_features(cell, shell_step_size, polynomial_degree):
 
     cell._padded_skeleton = padded_skeleton
     cell._pad_sk_soma = pad_sk_soma
-    cell._branching_structure = branching_structure
+    cell._branching_struct = branching_structure
     cell._branch_coords = coords
 
     (
@@ -105,12 +105,10 @@ def _extract_cell_features(cell, shell_step_size, polynomial_degree):
                                    pad_sk_soma, n_primary_branches)
 
     cell._concentric_coords = sholl_results[8]
-    cell._sholl_radii = sholl_results[9]
-    cell._sholl_intersections = sholl_results[10]
-    cell._sholl_polynomial_model = sholl_results[11]
-    cell._non_zero_sholl_radii = sholl_results[12]
-    cell._non_zero_sholl_intersections = sholl_results[13]
-    cell._polynomial_sholl_radii = sholl_results[14]
+    cell._sholl_intersections = sholl_results[9]
+    cell._sholl_polynomial_model = sholl_results[10]
+    cell._non_zero_sholl_intersections = sholl_results[11]
+    cell._polynomial_sholl_radii = sholl_results[12]
 
     features = {
         'surface_area': surface_area,

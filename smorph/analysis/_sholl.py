@@ -81,10 +81,8 @@ def sholl_analysis(
         sholl_regression_coeff,
         regression_intercept,
         concentric_coords,
-        radii,
         n_intersections,
         polynomial_model,
-        non_zero_radii,
         non_zero_n_intersections,
         polynomial_sholl_radii
     )

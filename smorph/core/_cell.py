@@ -22,6 +22,16 @@ class Cell:
     crop_tech : str
         Technique used to crop cell from tissue image,
         either 'manual' or 'auto', by default 'manual'.
+    contrast_ptiles : tuple of size 2, optional
+        `(low_percentile, hi_percentile)` Contains ends of band of percentile
+        values for pixel intensities to which the contrast of cell image
+        would be stretched, by default (0, 100)
+    threshold_method : str or None, optional
+        Automatic single intensity thresholding method to be used for
+        obtaining ROI from cell image either of 'otsu', 'isodata', 'li',
+        'mean', 'minimum', 'triangle', 'yen'. If None & crop_tech is 'auto' &
+        contrast stretch is (0, 100), a single intensity threshold of zero is
+        applied, by default 'otsu'
     reference_image : ndarray
         `image` would be standardized to the exposure level of this example.
     shell_step_size : int, optional
@@ -50,26 +60,30 @@ class Cell:
 
     """
     __slots__ = ('image', 'image_type', 'cleaned_image', 'features',
-                 'convex_hull', 'skeleton', '_fork_coords', '_branch_coords',
-                 '_branching_structure', '_concentric_coords', '_sholl_radii',
+                 'convex_hull', 'skeleton', 'shell_step_size', '_fork_coords',
+                 '_branch_coords', '_branching_struct', '_concentric_coords',
                  '_sholl_intersections', '_padded_skeleton', '_pad_sk_soma',
                  '_sholl_polynomial_model', '_polynomial_sholl_radii',
-                 '_non_zero_sholl_radii', '_non_zero_sholl_intersections')
+                 '_non_zero_sholl_intersections')
 
     def __init__(
         self,
         cell_image,
         image_type,
         crop_tech='manual',
+        contrast_ptiles=(0, 100),
+        threshold_method='otsu',
         reference_image=None,
         shell_step_size=3,
-        polynomial_degree=3
+        polynomial_degree=3,
     ):
         self.image = (cell_image if cell_image.ndim == 2
                       else rgb2gray(cell_image))
         self.image_type = image_type
+        self.shell_step_size = shell_step_size
         self.cleaned_image = preprocess_image(
-            self.image, image_type, reference_image, crop_tech)
+            self.image, image_type, reference_image, crop_tech,
+            contrast_ptiles, threshold_method)
         self.features = _extract_cell_features(
             self, shell_step_size, polynomial_degree)
 
@@ -123,7 +137,7 @@ class Cell:
                   'Resetting colors to ["r","b","m","g","c"].')
             colors = ['r', 'b', 'm', 'g', 'c']
 
-        branching_structure = self._branching_structure
+        branching_structure = self._branching_struct
         coords = self._branch_coords
         # store same level branch nodes in single array
         color_branches_coords = []
@@ -160,7 +174,7 @@ class Cell:
         Parameters
         ----------
         somacolor : str, optional
-            Color to highligh the skeleton soma, by default 'r'
+            Color to highlight the skeleton soma, by default 'r'
 
         """
         if not is_color_like(somacolor):
@@ -178,6 +192,7 @@ class Cell:
         # plot circles on skeleton
         ax = plt.subplots(figsize=(10, 6))[1]
         ax.imshow(cell_image_with_circles)
+
         # overlay soma on skeleton
         y, x = self._pad_sk_soma
         c = plt.Circle((x, y), 1, color=somacolor, alpha=.9)
@@ -186,8 +201,13 @@ class Cell:
         plt.tight_layout()
         plt.show()
 
+        shell_step_sz = self.shell_step_size
+        sholl_intersections = self._sholl_intersections
         # plot sholl graph showing radius vs. n_intersections
-        plt.plot(self._sholl_radii, self._sholl_intersections)
+        plt.plot(range(shell_step_sz,
+                        (len(sholl_intersections)+1)*shell_step_sz,
+                        shell_step_sz),
+                 sholl_intersections)
         plt.xlabel("Distance from centre")
         plt.ylabel("No. of intersections")
         plt.show()
@@ -200,12 +220,16 @@ class Cell:
         skeleton.
 
         """
+        shell_step_sz = self.shell_step_size
         last_intersection_idx = np.max(np.nonzero(self._sholl_intersections))
-        non_zero_radii = self._sholl_radii[:last_intersection_idx+1]
+        non_zero_radii = range(shell_step_sz,
+                               (last_intersection_idx + 2) * shell_step_sz,
+                               shell_step_sz)
+
         x_ = self._polynomial_sholl_radii
         y_data = self._non_zero_sholl_intersections
         # predict y from the data
-        reshaped_x = non_zero_radii.reshape((-1, 1))
+        reshaped_x = np.array(non_zero_radii).reshape((-1, 1))
 
         y_new = self._sholl_polynomial_model.predict(x_)
         # plot the results
