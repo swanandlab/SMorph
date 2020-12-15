@@ -1,1 +1,5 @@
-from ._image import preprocess_image
+from ._image import (
+    THRESHOLD_METHODS,
+    preprocess_image,
+    try_all_threshold
+)
