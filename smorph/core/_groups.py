@@ -12,7 +12,12 @@ from seaborn import color_palette
 from sklearn import decomposition, metrics, preprocessing
 from sklearn.cluster import KMeans
 
-from ..util._io import df_to_csv, dict_to_pickle, read_groups_folders
+from ..util._io import (
+    df_to_csv,
+    dict_to_pickle,
+    read_groups_folders,
+    silent_remove_file
+)
 from .api import Cell
 
 _ALL_FEATURE_NAMES = (
@@ -106,6 +111,7 @@ def _analyze_cells(
 
     """
     file_names, dataset = read_groups_folders(groups_folders)
+    SKIPPED_CELLS_FILENAME = 'skipped_cells.txt'
 
     dataset_features, targets = [], []
 
@@ -122,6 +128,8 @@ def _analyze_cells(
 
     if type(groups_crop_tech) == str:
         groups_crop_tech = [groups_crop_tech for i in range(N_GROUPS)]
+
+    silent_remove_file(SKIPPED_CELLS_FILENAME)
 
     for group_no, group in enumerate(dataset):
         group_cell_cnt = 0
@@ -152,6 +160,8 @@ def _analyze_cells(
                 bad_cells_idx.append(cell_cnt - 1)
                 print('Warning: Skipping analysis of',
                       f'"{file_names[cell_cnt - 1]}" due to {err}.')
+                with open(SKIPPED_CELLS_FILENAME, 'a') as skip_file:
+                    skip_file.write(file_names[cell_cnt - 1] + '\n')
 
         group_cnts.append(group_cell_cnt)
 

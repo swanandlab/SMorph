@@ -1,8 +1,17 @@
-from os import getcwd, listdir, mkdir, path
+from errno import ENOENT
+from os import getcwd, listdir, mkdir, path, remove
 from pickle import dump
 from shutil import rmtree
 
 import skimage.io as io
+
+
+def silent_remove_file(filename):
+    try:
+        remove(filename)
+    except OSError as e:
+        if e.errno != ENOENT:
+            raise
 
 
 def read_groups_folders(groups_folders):
