@@ -62,6 +62,10 @@ def import_confocal_image(img_path):
         img = czifile.imread(img_path)
         img = img.data
         img = img_as_float(np.squeeze(img)[0])
+    elif img_path.split('.')[-1] == 'lsm':
+        img = tifffile.imread(img_path)
+        img = img.data
+        img = img_as_float(img)[0, :, 0]
     else:
         img = img_as_float(io.imread(img_path))
 
