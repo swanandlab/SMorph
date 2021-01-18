@@ -1,4 +1,5 @@
 from .core import (
+    testThresholds,
     projectXYZ,
     import_confocal_image,
     calibrate_nlm_denoiser,

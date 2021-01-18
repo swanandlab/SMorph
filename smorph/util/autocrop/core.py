@@ -19,6 +19,46 @@ from skimage.segmentation import clear_border
 from skimage.util import unique_rows
 
 
+def testThresholds(
+    edge_filtered,
+    voxel_sz_x,
+    voxel_sz_y,
+    voxel_sz_z,
+    cmap='gray',
+    low_thresh=.06,
+    high_thresh=.45,
+    low_delta=.01,
+    high_delta=.05,
+    n=1
+):
+    aspect_xz = voxel_sz_z / voxel_sz_x
+    aspect_yz = voxel_sz_z / voxel_sz_y
+    N_ROWS = 2 * n + 1
+    fig, axes = plt.subplots(ncols=3, nrows=N_ROWS, figsize=(15, 8))
+    low_thresh -= low_delta * n
+    high_thresh -= high_delta * n
+    out = []
+
+    for i in range(N_ROWS):
+        thresholded = threshold(edge_filtered, low_thresh + i * low_delta,
+                                high_thresh + i * high_delta)
+        labels = label_thresholded(thresholded)
+        axes[i, 0].set_ylabel(f'L:{low_thresh + i * low_delta:.2f},\n'
+                              f'H:{high_thresh + i * high_delta:.2f}',
+                              rotation=0)
+        axes[i, 0].imshow(np.max(labels, axis=0), cmap=cmap)
+        # axes[i, 0].yaxis.tick_right()
+        axes[i, 1].imshow(np.max(labels, axis=1), cmap, aspect=aspect_xz)
+        axes[i, 2].imshow(np.max(labels, axis=2), cmap, aspect=aspect_yz)
+        out.append({'data': labels, 'colormap': 'gist_earth', 'gamma': .8,
+                    'name': (f'L:{low_thresh + i * low_delta:.2f}, '
+                             f'H:{high_thresh + i * high_delta:.2f}')})
+
+    fig.tight_layout()
+    plt.show()
+    return out
+
+
 def projectXYZ(img, voxel_sz_x, voxel_sz_y, voxel_sz_z, cmap='gray'):
     """Projects a 3D image in all planes.
 
