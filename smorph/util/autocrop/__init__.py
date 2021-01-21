@@ -4,6 +4,8 @@ from .core import (
     import_confocal_image,
     calibrate_nlm_denoiser,
     denoise,
+    select_ROI,
+    mask_ROI,
     filter_edges,
     threshold,
     label_thresholded,
