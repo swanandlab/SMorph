@@ -160,7 +160,7 @@ def _analyze_cells(
     features = DataFrame(dataset_features, columns=_ALL_FEATURE_NAMES)
 
     if save_features:
-        FEATURES_DIR, FEATURES_FILE_NAME = '/Features/', 'features.csv'
+        FEATURES_DIR, FEATURES_FILE_NAME = '/Results/', 'features.csv'
         out_features = features.copy()
         out_features.insert(0, 'cell_image_file', file_names)
         df_to_csv(out_features, FEATURES_DIR, FEATURES_FILE_NAME)
@@ -321,7 +321,7 @@ class Groups:
 
         if save_results:
             # single_cell_intersections
-            DIR, OUTFILE = '/Sholl Results/', 'sholl_intersections.csv'
+            DIR, OUTFILE = '/Results/', 'sholl_intersections.csv'
             cols = list(range(shell_step_sz,
                               (len_polynomial_plots + 1) * shell_step_sz,
                               shell_step_sz))
@@ -440,7 +440,7 @@ class Groups:
         if save_results:
             PC_COLUMN_NAMES = [f'PC {itr + 1}' for itr in range(n_PC)]
             pca_values = DataFrame(data=projected, columns=PC_COLUMN_NAMES)
-            df_to_csv(pca_values, '/PCA Results/', 'pca_values.csv')
+            df_to_csv(pca_values, '/Results/', 'pca_values.csv')
 
         fig, axes = plt.subplots(ncols=2, nrows=1, figsize=(8, 4))
 

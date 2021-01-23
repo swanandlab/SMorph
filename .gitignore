@@ -57,9 +57,7 @@ doc/_build/
 
 # Analysis results
 Datasets/
-Features/
-Sholl Results/
-PCA Results/
-autocropped/
+Results/
+Autocropped/
 
-pca values.csv
+*.csv

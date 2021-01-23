@@ -384,7 +384,7 @@ def export_cells(
 ):
     OUT_TYPE = ('3D', 'MIP')[output_option]
 
-    DIR = getcwd() + '/autocropped/'
+    DIR = getcwd() + '/Autocropped/'
     if not (path.exists(DIR) and path.isdir(DIR)):
         mkdir(DIR)
 

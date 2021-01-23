@@ -1,6 +1,5 @@
-from os import getcwd, listdir, mkdir, path
+from os import getcwd, listdir, mkdir, path, remove
 from pickle import dump
-from shutil import rmtree
 
 import skimage.io as io
 
@@ -50,9 +49,11 @@ def df_to_csv(df, folder, out_file_name):
 
     """
     DIR = getcwd() + folder
-    if path.exists(DIR) and path.isdir(DIR):
-        rmtree(DIR)
-    mkdir(DIR)
+    FILE = DIR + out_file_name
+    if not (path.exists(DIR) and path.isdir(DIR)):
+        mkdir(DIR)
+    if path.exists(FILE):
+        remove(FILE)
 
     df.to_csv(DIR + out_file_name, index=False, mode='w')
 
@@ -71,9 +72,11 @@ def dict_to_pickle(data, folder, out_file_name):
 
     """
     DIR = getcwd() + folder
-    if path.exists(DIR) and path.isdir(DIR):
-        rmtree(DIR)
-    mkdir(DIR)
+    FILE = DIR + out_file_name
+    if not (path.exists(DIR) and path.isdir(DIR)):
+        mkdir(DIR)
+    if path.exists(FILE):
+        remove(FILE)
 
     with open(DIR + out_file_name, 'wb') as file:
         dump(data, file, -1)
