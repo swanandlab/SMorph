@@ -4,6 +4,7 @@ from shutil import rmtree
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import skimage.io as io
 import tifffile
 import czifile
@@ -53,8 +54,8 @@ def testThresholds(
         axes[i, 1].imshow(np.max(labels, axis=1), cmap, aspect=aspect_xz)
         axes[i, 2].imshow(np.max(labels, axis=2), cmap, aspect=aspect_yz)
         out.append({'data': labels, 'colormap': 'gist_earth', 'gamma': .8,
-                    'name': (f'L:{low_thresh + i * low_delta:.2f}, '
-                             f'H:{high_thresh + i * high_delta:.2f}')})
+                    'name': (f'L:{low_thresh + i * low_delta:.3f}, '
+                             f'H:{high_thresh + i * high_delta:.3f}')})
 
     fig.tight_layout()
     plt.show()
@@ -91,7 +92,7 @@ def projectXYZ(img, voxel_sz_x, voxel_sz_y, voxel_sz_z, cmap='gray'):
 def import_confocal_image(img_path):
     """Loads the 3D confocal image.
 
-    Tested on: CZI, TIFF
+    - Tested on: CZI, LSM, TIFF
 
     Parameters
     ----------
@@ -380,7 +381,8 @@ def export_cells(
     hi_vol_cutoff,
     output_option,
     denoised,
-    regions
+    regions,
+    name_roi
 ):
     OUT_TYPE = ('3D', 'MIP')[output_option]
 
@@ -389,7 +391,8 @@ def export_cells(
         mkdir(DIR)
 
     IMAGE_NAME = path.basename(img_path).split('.')[0]
-    OUT_DIR = DIR + IMAGE_NAME + f'_{OUT_TYPE}/'
+    OUT_DIR = DIR + IMAGE_NAME + \
+              f'{"" if name_roi == "" else "-" + str(name_roi)}_{OUT_TYPE}/'
     if path.exists(OUT_DIR) and path.isdir(OUT_DIR):
         rmtree(OUT_DIR)
     mkdir(OUT_DIR)
@@ -418,3 +421,25 @@ def export_cells(
             name = (f'{OUT_DIR}cell{obj}-({minx},{miny},{minz}),'
                     f'({maxx},{maxy},{maxz}).tif')
             tifffile.imsave(name, out, description=cell_metadata)
+
+
+def label_clusters(file, regions, tissue_img, name_roi, selected_roi):
+    clustered_cells = pd.read_csv(file)
+    IMG_NAME = tissue_img.split('/')[-1].split('.')[0]
+    cell_names = clustered_cells['file_name']
+    folder_names = cell_names.str.split('/').str[-2]
+    file_names = cell_names.str.split('/').str[-1]
+    img_indices = folder_names.index
+    mask = cell_names[img_indices].str.contains(name_roi)
+    analyzed_idx = mask.loc[lambda x: x].index
+    analyzed = clustered_cells.iloc[analyzed_idx]
+
+    if IMG_NAME in analyzed.loc[0][0]:
+        if selected_roi and mask.any():
+            regions_indices = file_names.str.split('-').str[0].str[4:]
+            regions_indices = regions_indices[analyzed_idx]
+            cluster_label = analyzed['cluster']
+            pts = [regions[int(i)].centroid for i in regions_indices]
+            pts_properties = {'cluster': cluster_label.to_numpy()}
+            return pts, pts_properties
+    return None

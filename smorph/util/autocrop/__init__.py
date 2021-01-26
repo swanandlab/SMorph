@@ -15,5 +15,6 @@ from .core import (
     paginate_objs,
     extract_obj,
     project_batch,
-    export_cells
+    export_cells,
+    label_clusters
 )

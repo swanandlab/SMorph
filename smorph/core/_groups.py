@@ -52,7 +52,7 @@ def _analyze_cells(
     save_features,
     show_logs
 ):
-    """Performs complete reading & feature extraction for groups of cells.
+    """Performs complete reading &thre feature extraction for groups of cells.
 
     Parameters
     ----------
@@ -597,7 +597,8 @@ class Groups:
         k=None,
         use_features=True,
         n_PC=None,
-        plot='parallel'
+        plot='parallel',
+        save_results=True
     ):
         """
         Highly configurable K-Means clustering & visualization of cell data.
@@ -615,6 +616,8 @@ class Groups:
             number of Principal Components calculated.
         plot : str or None, default 'parallel'
             The type of plot user would like to get, either parallel or scatter.
+        save_results : bool, optional
+            To save a file containing clustering results, by default True
 
         Returns
         -------
@@ -776,5 +779,10 @@ class Groups:
             l_pos = group_pos[idx - 1]
             dist[self.labels[idx - 1]] = (
                 df['cluster'][l_pos: r_pos].value_counts())
+
+        if save_results:
+            out = DataFrame(self.file_names, columns=['file_name'])
+            out[df.columns] = df
+            df_to_csv(out, '/Results/', 'clustered_cells.csv')
 
         return centers_df, df, dist
