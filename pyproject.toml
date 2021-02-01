@@ -21,7 +21,7 @@ ipyvolume = "^0.5.2"
 napari = "^0.3.8"
 tifffile = "2020.9.3"
 czifile = "^2019.7.2"
-read-roi = "^1.6.0"
+roifile = "2020.8.13"
 
 [tool.poetry.dev-dependencies]
 

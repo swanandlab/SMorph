@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import skimage.io as io
 import tifffile
+import roifile
 import czifile
 from matplotlib.path import Path
 from psutil import virtual_memory
@@ -167,7 +168,20 @@ def denoise(img, denoise_parameters):
     return denoised
 
 
-def select_ROI(denoised):
+def select_ROI(denoised, name, filename=None):
+    if filename is None:
+        return _draw_ROI(denoised, name)
+    return _load_ROI(filename)
+
+
+def _load_ROI(filename):
+    roi = roifile.roiread(filename)
+    roi = roi if type(roi) != list else roi[0]
+    polygon_coords = roi.coordinates()
+    return polygon_coords
+
+
+def _draw_ROI(denoised, name):
     class LineBuilder:
         def __init__(self, line):
             self.line = line
@@ -184,12 +198,14 @@ def select_ROI(denoised):
             if len(self.xs) > 3:
                 L1 = [(self.xs[0], self.ys[0]), (self.xs[1], self.ys[1])]
                 L2 = [(self.xs[-2], self.ys[-2]), (self.xs[-1], self.ys[-1])]
-                L1 = LineString(L1)
-                L2 = LineString(L2)
+                L1, L2 = LineString(L1), LineString(L2)
                 res = L1.intersection(L2)
                 try:
                     res.xy
                     self.xs[-1], self.ys[-1] = res.x, res.y
+                    roi = roifile.ImagejRoi.frompoints(
+                        list(zip(linebuilder.xs, linebuilder.ys)))
+                    roifile.roiwrite('Results/' + name + '.roi', roi)
                     self.line.figure.canvas.mpl_disconnect(self.cid)
                 except:
                     pass
@@ -208,10 +224,16 @@ def select_ROI(denoised):
 
 def mask_ROI(img, linebuilder):
     # Create a binary image (mask) from ROI object.
-    poly_path = Path(list(zip(linebuilder.xs, linebuilder.ys)))
     y, x = np.mgrid[:img.shape[1], :img.shape[2]]
-    min_x, max_x = int(min(linebuilder.xs)), int(max(linebuilder.xs) + 1)
-    min_y, max_y = int(min(linebuilder.ys)), int(max(linebuilder.ys) + 1)
+    if type(linebuilder) != np.ndarray:
+        poly_path = Path(list(zip(linebuilder.xs, linebuilder.ys)))
+        min_x, max_x = int(min(linebuilder.xs)), int(max(linebuilder.xs) + 1)
+        min_y, max_y = int(min(linebuilder.ys)), int(max(linebuilder.ys) + 1)
+    else:
+        poly_path = Path(linebuilder)
+        linebuilder = list(zip(*linebuilder))
+        min_x, max_x = int(min(linebuilder[0])), int(max(linebuilder[0]) + 1)
+        min_y, max_y = int(min(linebuilder[1])), int(max(linebuilder[1]) + 1)
     coords = np.hstack((x.reshape(-1, 1), y.reshape(-1, 1)))
 
     mask = poly_path.contains_points(coords)
