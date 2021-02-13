@@ -75,14 +75,14 @@ class Cell:
         threshold_method='otsu',
         reference_image=None,
         shell_step_size=3,
-        polynomial_degree=3,
+        polynomial_degree=3
     ):
-        self.image = (cell_image if cell_image.ndim == 2
-                      else rgb2gray(cell_image))
+        image = (cell_image if cell_image.ndim == 2
+                 else rgb2gray(cell_image))
         self.image_type = image_type
         self.shell_step_size = shell_step_size
-        self.cleaned_image = preprocess_image(
-            self.image, image_type, reference_image, crop_tech,
+        self.image, self.cleaned_image = preprocess_image(
+            image, image_type, reference_image, crop_tech,
             contrast_ptiles, threshold_method)
         self.features = _extract_cell_features(
             self, shell_step_size, polynomial_degree)
@@ -205,8 +205,8 @@ class Cell:
         sholl_intersections = self._sholl_intersections
         # plot sholl graph showing radius vs. n_intersections
         plt.plot(range(shell_step_sz,
-                        (len(sholl_intersections)+1)*shell_step_sz,
-                        shell_step_sz),
+                       (len(sholl_intersections)+1)*shell_step_sz,
+                       shell_step_sz),
                  sholl_intersections)
         plt.xlabel("Distance from centre")
         plt.ylabel("No. of intersections")

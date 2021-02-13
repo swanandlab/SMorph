@@ -25,38 +25,43 @@ def _get_blobs(cell_image, image_type):
     """
 
     if image_type == "DAB":
-        inverted_cell_image = invert(cell_image)
-        blobs_log = blob_log(inverted_cell_image, min_sigma=6, max_sigma=20,
-                             num_sigma=10, threshold=0.1, overlap=0.5)
+        min_sigma, max_sigma, num_sigma = 6, 20, 10
+        threshold, overlap = 0.1, 0.5
+        image = invert(cell_image)
     elif image_type == "confocal":
         min_sigma, max_sigma, num_sigma = 3, 20, 10
         threshold, overlap = 0.1, 0.5
+        image = cell_image
 
-        blobs_log = blob_log(cell_image, min_sigma, max_sigma, num_sigma,
-                             threshold, overlap)
+    blobs_log = blob_log(image, min_sigma=min_sigma,
+                         max_sigma=max_sigma, num_sigma=num_sigma,
+                         threshold=threshold, overlap=overlap)
 
-        def eliminate_border_blobs(blobs_log):
-            """Find the blobs too close to border so as to eliminate them."""
-            border_x = cell_image.shape[1] / 5
-            border_y = cell_image.shape[0] / 5
+    def eliminate_border_blobs(blobs_log):
+        """Find the blobs too close to border so as to eliminate them."""
+        border_x = image.shape[1] / 5
+        border_y = image.shape[0] / 5
 
-            filtered_blobs = blobs_log[(border_x < blobs_log[:, 1]) &
-                                       (blobs_log[:, 1] < 4*border_x) &
-                                       (border_y < blobs_log[:, 0]) &
-                                       (blobs_log[:, 0] < 4*border_y)]
+        filtered_blobs = blobs_log[(border_x < blobs_log[:, 1]) &
+                                   (blobs_log[:, 1] < 4*border_x) &
+                                   (border_y < blobs_log[:, 0]) &
+                                   (blobs_log[:, 0] < 4*border_y)]
 
-            return filtered_blobs
+        return filtered_blobs
 
-        blobs_log = eliminate_border_blobs(blobs_log)
+    blobs_log = eliminate_border_blobs(blobs_log)
 
-        if len(blobs_log) < 1:
-            # if none of the blobs remain after border blob elimination,
-            # try blob_log with less stringent parameters
-            while len(blobs_log) < 1 and min_sigma > 2:  # TODO: handle fail
-                min_sigma -= 1
-                blobs_log = blob_log(cell_image, min_sigma, max_sigma,
-                                     num_sigma, threshold, overlap)
-                blobs_log = eliminate_border_blobs(blobs_log)
+    if len(blobs_log) < 1:
+        # if none of the blobs remain after border blob elimination,
+        # try blob_log with less stringent parameters
+        while len(blobs_log) < 1 and min_sigma > 2:  # TODO: handle fail
+            min_sigma -= 1
+            blobs_log = blob_log(image, min_sigma, max_sigma,
+                                 num_sigma, threshold, overlap)
+            blobs_log = eliminate_border_blobs(blobs_log)
+
+    if len(blobs_log) < 1:
+        raise RuntimeError('No blob detected for the soma!')
 
     return blobs_log
 
