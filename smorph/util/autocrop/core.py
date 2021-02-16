@@ -9,6 +9,7 @@ import skimage.io as io
 import tifffile
 import czifile
 from psutil import virtual_memory
+from scipy.ndimage import binary_fill_holes
 from scipy.spatial import ConvexHull
 from skimage import img_as_float, img_as_ubyte
 from skimage.filters import apply_hysteresis_threshold, sobel
@@ -277,17 +278,17 @@ def paginate_objs(regions, pg_size=50):
     return N_BATCHES
 
 
-def extract_obj(region, denoised):
+def extract_obj(region, tissue_img):
     minz, miny, minx, maxz, maxy, maxx = region.bbox
 
-    extracted_obj = denoised[minz:maxz, miny:maxy, minx:maxx].copy()
-    extracted_obj[~region.filled_image] = 0.0
+    extracted_obj = tissue_img[minz:maxz, miny:maxy, minx:maxx].copy()
+    extracted_obj[~binary_fill_holes(region.filled_image)] = 0.0
 
     print(f'Volume of this object is: {region.area}')
     return extracted_obj
 
 
-def project_batch(BATCH_NO, N_BATCHES, regions, denoised):
+def project_batch(BATCH_NO, N_BATCHES, regions, tissue_img):
     N_OBJECTS = len(regions)
 
     if BATCH_NO >= N_BATCHES:
@@ -307,8 +308,8 @@ def project_batch(BATCH_NO, N_BATCHES, regions, denoised):
         ax[-1].set_title(f'Obj {obj}; Vol: {regions[obj].area}')
         ax[-1].axis('off')
 
-        extracted_cell = denoised[minz:maxz, miny:maxy, minx:maxx].copy()
-        extracted_cell[~regions[obj].filled_image] = 0.0
+        extracted_cell = tissue_img[minz:maxz, miny:maxy, minx:maxx].copy()
+        extracted_cell[~binary_fill_holes(regions[obj].filled_image)] = 0.0
 
         plt.imshow(np.max(extracted_cell, 0), cmap='gray')
 
@@ -318,7 +319,7 @@ def export_cells(
     low_vol_cutoff,
     hi_vol_cutoff,
     output_option,
-    denoised,
+    tissue_img,
     regions,
     name_roi
 ):
@@ -350,9 +351,9 @@ def export_cells(
         if low_vol_cutoff < region.area < hi_vol_cutoff:
             minz, miny, minx, maxz, maxy, maxx = region.bbox
 
-            segmented = denoised[minz:maxz, miny:maxy, minx:maxx].copy()
+            segmented = tissue_img[minz:maxz, miny:maxy, minx:maxx].copy()
             segmented = img_as_ubyte(segmented)
-            segmented[~region.filled_image] = 0
+            segmented[~binary_fill_holes(region.filled_image)] = 0
 
             out = segmented if OUT_TYPE == '3D' else np.max(segmented, 0)
 
