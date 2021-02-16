@@ -1,6 +1,5 @@
 import matplotlib.pyplot as plt
 import numpy as np
-from copy import deepcopy
 from matplotlib.colors import is_color_like
 from skimage.color import rgb2gray
 
@@ -165,7 +164,7 @@ class Cell:
         plt.tight_layout()
         plt.show()
 
-    def plot_sholl_results(self, somacolor='r'):
+    def plot_sholl_results(self, somacolor='r', radiicolor='r'):
         """Plots results of Sholl Analysis.
 
         This individually plots cell skeleton with sholl circles & Sholl radii
@@ -175,6 +174,8 @@ class Cell:
         ----------
         somacolor : str, optional
             Color to highlight the skeleton soma, by default 'r'
+        radiicolor : str, optional
+            Color to highlight the sholl radii, by default 'r'
 
         """
         if not is_color_like(somacolor):
@@ -182,31 +183,30 @@ class Cell:
                   'Resetting highlight color to red.')
             somacolor = 'r'
 
-        concentric_coordinates = self._concentric_coords
-        cell_padded_skeleton = deepcopy(self._padded_skeleton)
-        for coordinates in concentric_coordinates.values():
-            for coord in coordinates:
-                cell_image_with_circles = cell_padded_skeleton
-                cell_image_with_circles[coord[0], coord[1]] = 1
-
-        # plot circles on skeleton
         ax = plt.subplots(figsize=(10, 6))[1]
-        ax.imshow(cell_image_with_circles)
+        ax.imshow(self._padded_skeleton)
 
         # overlay soma on skeleton
         y, x = self._pad_sk_soma
         c = plt.Circle((x, y), 1, color=somacolor, alpha=.9)
         ax.add_patch(c)
         ax.set_axis_off()
+
+        radius = self.shell_step_size
+        sholl_intersections = self._sholl_intersections
+
+        # plot circles on skeleton
+        for r in range(radius, (len(sholl_intersections)+1)*radius, radius):
+            c = plt.Circle((x, y), r, fill=False, lw=2,
+                           ec=radiicolor, alpha=.64)
+            ax.add_patch(c)
         plt.tight_layout()
         plt.show()
 
-        shell_step_sz = self.shell_step_size
-        sholl_intersections = self._sholl_intersections
         # plot sholl graph showing radius vs. n_intersections
-        plt.plot(range(shell_step_sz,
-                       (len(sholl_intersections)+1)*shell_step_sz,
-                       shell_step_sz),
+        plt.plot(range(radius,
+                       (len(sholl_intersections)+1)*radius,
+                       radius),
                  sholl_intersections)
         plt.xlabel("Distance from centre")
         plt.ylabel("No. of intersections")
