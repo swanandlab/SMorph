@@ -1,6 +1,5 @@
 from errno import ENOENT
 from os import getcwd, listdir, mkdir, path, remove
-from pickle import dump
 
 import skimage.io as io
 

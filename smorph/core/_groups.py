@@ -1,3 +1,4 @@
+from collections import defaultdict
 from itertools import cycle
 
 import ipyvolume as ipv
@@ -5,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import Ellipse
 from pandas import DataFrame
-from pandas.plotting import parallel_coordinates
+from pandas.plotting import parallel_coordinates, scatter_matrix
 from scipy.stats import sem
 from seaborn import color_palette
 from sklearn import decomposition, metrics, preprocessing
@@ -144,6 +145,12 @@ def _analyze_cells(
                             shell_step_size=shell_step_sz,
                             polynomial_degree=poly_degree)
                 cell_features = list(cell.features.values())
+
+                for feature in cell_features:
+                    if feature is None:
+                        raise RuntimeError('Illegal morphological '
+                                           'features extracted!')
+
                 group_cell_cnt += 1
 
                 targets.append(group_no)
@@ -339,6 +346,28 @@ class Groups:
             write_buffer[df_polynomial_plots.columns] = df_polynomial_plots
             df_to_csv(write_buffer, DIR, OUTFILE)
 
+    def feature_scatter_matrix(self, on_features):
+        """Plot feature scatter matrix.
+
+        Parameters
+        ----------
+        on_features : list, optional
+            List of names of morphological features using which
+            scatter matrix will be plotted, by default None.
+            If None, all 23 morphological features will be used.
+
+        """
+        if on_features is None:
+            on_features = list(_ALL_FEATURE_NAMES)
+
+        axis = scatter_matrix(self.features[on_features])
+        for ax in axis.flatten():
+            ax.xaxis.label.set_rotation(30)
+            ax.xaxis.label.set_ha('right')
+            ax.yaxis.label.set_rotation(45)
+            ax.yaxis.label.set_ha('right')
+
+        plt.show()
 
     def pca(
         self,
@@ -495,7 +524,7 @@ class Groups:
         return feature_significance, covariance_matix, var_PCs
 
     def plot_feature_histograms(self, features=list(_ALL_FEATURE_NAMES)):
-        """Plots feature significance heatmap.
+        """Plots feature histograms for groups.
 
         Raises
         ------
@@ -558,7 +587,10 @@ class Groups:
         sorted_feature_names = np.array(self.pca_feature_names)[
             significance_order_PC_1]
 
-        plt.matshow(np.array(sorted_feature_significance), cmap='gist_heat')
+        data = np.array(sorted_feature_significance)
+        plt.matshow(data, cmap='bwr')
+        for (i, j), z in np.ndenumerate(data):
+            plt.text(j, i, f'{z:.1f}', ha='center', va='center')
         plt.yticks(list(range(n_PC)), [
             f'PC {i+1}' for i in range(n_PC)], fontsize=10)
         plt.colorbar(orientation='horizontal')
@@ -605,7 +637,8 @@ class Groups:
         k=None,
         use_features=True,
         n_PC=None,
-        plot='parallel'
+        plot='parallel',
+        save_results=True
     ):
         """
         Highly configurable K-Means clustering & visualization of cell data.
@@ -623,6 +656,8 @@ class Groups:
             number of Principal Components calculated.
         plot : str or None, default 'parallel'
             The type of plot user would like to get, either parallel or scatter.
+        save_results : bool, optional
+            To save a file containing clustering results, by default True
 
         Returns
         -------
@@ -784,5 +819,10 @@ class Groups:
             l_pos = group_pos[idx - 1]
             dist[self.labels[idx - 1]] = (
                 df['cluster'][l_pos: r_pos].value_counts())
+
+        if save_results:
+            out = DataFrame(self.file_names, columns=['file_name'])
+            out[df.columns] = df
+            df_to_csv(out, '/Results/', 'clustered_cells.csv')
 
         return centers_df, df, dist
