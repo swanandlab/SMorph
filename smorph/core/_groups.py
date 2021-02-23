@@ -331,7 +331,6 @@ class Groups:
             write_buffer[df_polynomial_plots.columns] = df_polynomial_plots
             df_to_csv(write_buffer, DIR, OUTFILE)
 
-
     def pca(
         self,
         n_PC,
