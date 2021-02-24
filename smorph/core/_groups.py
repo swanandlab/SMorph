@@ -346,7 +346,7 @@ class Groups:
             write_buffer[df_polynomial_plots.columns] = df_polynomial_plots
             df_to_csv(write_buffer, DIR, OUTFILE)
 
-    def feature_scatter_matrix(self, on_features):
+    def plot_feature_scatter_matrix(self, on_features):
         """Plot feature scatter matrix.
 
         Parameters
@@ -360,7 +360,13 @@ class Groups:
         if on_features is None:
             on_features = list(_ALL_FEATURE_NAMES)
 
-        axis = scatter_matrix(self.features[on_features])
+        subset_features = self.features[on_features]
+
+        scaler = preprocessing.MinMaxScaler()
+        scaler.fit(subset_features)
+        X = DataFrame(scaler.transform(subset_features), columns=on_features)
+
+        axis = scatter_matrix(X, figsize=(18, 18))
         for ax in axis.flatten():
             ax.xaxis.label.set_rotation(30)
             ax.xaxis.label.set_ha('right')
@@ -452,7 +458,7 @@ class Groups:
 
         subset_features = self.features[on_features].to_numpy()
 
-        pca_object = decomposition.PCA(n_PC)
+        pca_object = decomposition.PCA(n_PC, svd_solver='arpack')
 
         # Scale data
         scaler = preprocessing.MaxAbsScaler()
