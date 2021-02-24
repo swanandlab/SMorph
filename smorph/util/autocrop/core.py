@@ -11,6 +11,7 @@ import czifile
 from psutil import virtual_memory
 from scipy.spatial import ConvexHull
 from skimage import img_as_float, img_as_ubyte
+from skimage.draw import polygon2mask
 from skimage.filters import apply_hysteresis_threshold, sobel
 from skimage.measure import label, regionprops
 from skimage.morphology import binary_erosion
@@ -230,7 +231,7 @@ def _check_coords_in_hull(gridcoords, hull_equations, tolerance):
     return coords_in_hull
 
 
-def compute_convex_hull(thresholded, tolerance=1e-10):
+def _compute_convex_hull(thresholded, tolerance=1e-10):
     surface = thresholded ^ binary_erosion(thresholded)
     ndim = surface.ndim
     if np.count_nonzero(surface) == 0:
@@ -256,9 +257,23 @@ def compute_convex_hull(thresholded, tolerance=1e-10):
     return mask
 
 
-def filter_labels(labels, convex_hull):
+def filter_labels(labels, thresholded, polygon):
+    # Find convex hull that approximates tissue structure
+    convex_hull = _compute_convex_hull(thresholded)
     filtered_labels = clear_border(clear_border(labels),
                                    mask=binary_erosion(convex_hull))
+
+    if polygon is not None:
+        shape = convex_hull.shape
+        roi_mask = np.empty(shape)
+        y, x = int(polygon[:, 0].max()), int(polygon[:, 1].max())
+        roi_mask[0] = polygon2mask((y, x), polygon).T[-shape[1]:, -shape[2]:]
+
+        for i in range(1, shape[0]):
+            roi_mask[i] = roi_mask[0]
+        filtered_labels = clear_border(clear_border(filtered_labels),
+                                    mask=binary_erosion(roi_mask))
+
     return filtered_labels
 
 
@@ -293,7 +308,6 @@ def project_batch(BATCH_NO, N_BATCHES, regions, tissue_img):
     if BATCH_NO >= N_BATCHES:
         raise ValueError(f'BATCH_NO should only be from 0 to {N_BATCHES-1}!')
 
-    w = h = 10
     fig = plt.figure(figsize=(11, 20))
     rows, columns = 10, 5
     ax = []
@@ -328,7 +342,7 @@ def export_cells(
     if not (path.exists(DIR) and path.isdir(DIR)):
         mkdir(DIR)
 
-    IMAGE_NAME = path.basename(img_path).split('.')[0]
+    IMAGE_NAME = '.'.join(path.basename(img_path).split('.')[:-1])
     OUT_DIR = DIR + IMAGE_NAME + \
               f'{"" if name_roi == "" else "-" + str(name_roi)}_{OUT_TYPE}/'
     if path.exists(OUT_DIR) and path.isdir(OUT_DIR):
@@ -354,7 +368,9 @@ def export_cells(
             segmented = img_as_ubyte(segmented)
             segmented[~region.filled_image] = 0
 
-            out = segmented if OUT_TYPE == '3D' else np.max(segmented, 0)
+            out = segmented if OUT_TYPE == '3D' else np.pad(
+                np.max(segmented, 0), pad_width=max(segmented.shape[1:]) // 5,
+                mode='constant')
 
             name = (f'{OUT_DIR}cell{obj}-({minx},{miny},{minz}),'
                     f'({maxx},{maxy},{maxz}).tif')
