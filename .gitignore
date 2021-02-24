@@ -61,4 +61,5 @@ Features/
 Sholl Results/
 PCA Results/
 
-pca values.csv
+pca values
+skipped_cells.txt
