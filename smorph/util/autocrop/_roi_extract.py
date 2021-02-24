@@ -65,13 +65,13 @@ def mask_ROI(original, denoised, linebuilder):
     y, x = np.mgrid[:original.shape[1], :original.shape[2]]
     if type(linebuilder) != np.ndarray:
         poly_path = Path(list(zip(linebuilder.xs, linebuilder.ys)))
-        min_x, max_x = int(min(linebuilder.xs)), int(max(linebuilder.xs) + 1)
-        min_y, max_y = int(min(linebuilder.ys)), int(max(linebuilder.ys) + 1)
+        X, Y = linebuilder.xs, linebuilder.ys
     else:
         poly_path = Path(linebuilder)
         linebuilder = list(zip(*linebuilder))
-        min_x, max_x = int(min(linebuilder[0])), int(max(linebuilder[0]) + 1)
-        min_y, max_y = int(min(linebuilder[1])), int(max(linebuilder[1]) + 1)
+        X, Y = linebuilder[0], linebuilder[1]
+    min_x, max_x = int(min(X)), int(max(X) + 1)
+    min_y, max_y = int(min(Y)), int(max(Y) + 1)
     coords = np.hstack((x.reshape(-1, 1), y.reshape(-1, 1)))
 
     mask = poly_path.contains_points(coords)

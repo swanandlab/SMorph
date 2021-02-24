@@ -277,9 +277,21 @@ def filter_labels(labels, thresholded, polygon):
     return filtered_labels
 
 
+def _filter_small_objects(regions):
+    CUTOFF_VOLUME_3D = 27
+    idx = 0
+    for region in regions:
+        if region.area > CUTOFF_VOLUME_3D:
+            break
+        idx += 1
+    filtered = regions[idx:]
+    return filtered
+
+
 def arrange_regions(filtered_labels):
     regions = sorted(regionprops(filtered_labels),
                      key=lambda region: region.area)
+    regions = _filter_small_objects(regions)
     return regions
 
 
