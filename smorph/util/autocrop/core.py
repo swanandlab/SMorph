@@ -382,14 +382,21 @@ def export_cells(
     for (obj, region) in enumerate(regions):
         if low_vol_cutoff < region.area < hi_vol_cutoff:
             minz, miny, minx, maxz, maxy, maxx = region.bbox
+            scale_z = (maxz - minz) // 10
+            scale_y = (maxy - miny) // 10
+            scale_x = (maxx - minx) // 10
+            minz = max(0, minz - scale_z)
+            miny = max(0, miny - scale_y)
+            minx = max(0, minx - scale_x)
+            maxz += scale_z
+            maxy += scale_y
+            maxx += scale_x
 
             segmented = tissue_img[minz:maxz, miny:maxy, minx:maxx].copy()
             segmented = img_as_ubyte(segmented)
-            segmented[~region.filled_image] = 0
+            # segmented[~region.filled_image] = 0
 
-            out = segmented if OUT_TYPE == '3D' else np.pad(
-                np.max(segmented, 0), pad_width=max(segmented.shape[1:]) // 5,
-                mode='constant')
+            out = segmented if OUT_TYPE == '3D' else np.max(segmented, 0)
 
             name = (f'{OUT_DIR}cell{obj}-({minx},{miny},{minz}),'
                     f'({maxx},{maxy},{maxz}).tif')
