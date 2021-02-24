@@ -264,15 +264,22 @@ def filter_labels(labels, thresholded, polygon):
                                    mask=binary_erosion(convex_hull))
 
     if polygon is not None:
-        shape = convex_hull.shape
+        if type(polygon) != np.ndarray:
+            X, Y = polygon.xs, polygon.ys
+        else:
+            polygon = list(zip(*polygon))
+            X, Y = polygon[0], polygon[1]
+        min_x, max_x = int(min(X)), int(max(X) + 1)
+        min_y, max_y = int(min(Y)), int(max(Y) + 1)
+        shape = labels.shape
         roi_mask = np.empty(shape)
-        y, x = int(polygon[:, 0].max()), int(polygon[:, 1].max())
-        roi_mask[0] = polygon2mask((y, x), polygon).T[-shape[1]:, -shape[2]:]
+        roi_mask[0] = polygon2mask((max_x, max_y),
+                                   list(zip(X, Y)))[min_x:max_x, min_y:max_y].T
 
         for i in range(1, shape[0]):
             roi_mask[i] = roi_mask[0]
         filtered_labels = clear_border(clear_border(filtered_labels),
-                                    mask=binary_erosion(roi_mask))
+                                       mask=binary_erosion(roi_mask))
 
     return filtered_labels
 
