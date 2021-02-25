@@ -353,9 +353,11 @@ def export_cells(
     output_option,
     tissue_img,
     regions,
-    name_roi
+    name_roi,
+    seg_type='segmented'
 ):
     OUT_TYPE = ('3D', 'MIP')[output_option]
+    SEG_TYPES = ('segmented', 'unsegmented', 'both')
 
     DIR = getcwd() + '/Autocropped/'
     if not (path.exists(DIR) and path.isdir(DIR)):
@@ -382,25 +384,40 @@ def export_cells(
     for (obj, region) in enumerate(regions):
         if low_vol_cutoff < region.area < hi_vol_cutoff:
             minz, miny, minx, maxz, maxy, maxx = region.bbox
-            scale_z = (maxz - minz) // 10
-            scale_y = (maxy - miny) // 10
-            scale_x = (maxx - minx) // 10
-            minz = max(0, minz - scale_z)
-            miny = max(0, miny - scale_y)
-            minx = max(0, minx - scale_x)
-            maxz += scale_z
-            maxy += scale_y
-            maxx += scale_x
 
-            segmented = tissue_img[minz:maxz, miny:maxy, minx:maxx].copy()
-            segmented = img_as_ubyte(segmented)
-            # segmented[~region.filled_image] = 0
+            if seg_type == SEG_TYPES[0] or seg_type == SEG_TYPES[2]:
+                scale_z = (maxz - minz) // 5
+                scale_y = (maxy - miny) // 5
+                scale_x = (maxx - minx) // 5
+                minz = max(0, minz - scale_z)
+                miny = max(0, miny - scale_y)
+                minx = max(0, minx - scale_x)
+                maxz += scale_z
+                maxy += scale_y
+                maxx += scale_x
 
-            out = segmented if OUT_TYPE == '3D' else np.max(segmented, 0)
+                segmented = tissue_img[minz:maxz, miny:maxy, minx:maxx].copy()
+                segmented = img_as_ubyte(segmented)
+                out = segmented if OUT_TYPE == '3D' else np.max(segmented, 0)
 
-            name = (f'{OUT_DIR}cell{obj}-({minx},{miny},{minz}),'
-                    f'({maxx},{maxy},{maxz}).tif')
-            tifffile.imsave(name, out, description=cell_metadata)
+                name = (f'{OUT_DIR}{SEG_TYPES[0]}/cell{obj}-({minx},{miny},'
+                        f'{minz}),({maxx},{maxy},{maxz}).tif')
+
+                tifffile.imsave(name, out, description=cell_metadata)
+
+            if seg_type == SEG_TYPES[1] or seg_type == SEG_TYPES[2]:
+                segmented = tissue_img[minz:maxz, miny:maxy, minx:maxx].copy()
+                segmented = img_as_ubyte(segmented)
+                segmented[~region.filled_image] = 0
+
+                out = segmented if OUT_TYPE == '3D' else np.pad(
+                    np.max(segmented, 0),
+                    pad_width=max(segmented.shape[1:]) // 5, mode='constant')
+
+                name = (f'{OUT_DIR}{SEG_TYPES[1]}/cell{obj}-({minx},{miny},'
+                        f'{minz}),({maxx},{maxy},{maxz}).tif')
+
+                tifffile.imsave(name, out, description=cell_metadata)
 
 
 def label_clusters(file, regions, tissue_img, name_roi, selected_roi):
