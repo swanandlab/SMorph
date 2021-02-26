@@ -1,3 +1,5 @@
+from os import getcwd, mkdir, path, remove
+
 import matplotlib.pyplot as plt
 import numpy as np
 import roifile
@@ -25,7 +27,8 @@ def _draw_ROI(denoised, name):
             self.line = line
             self.xs = list(line.get_xdata())
             self.ys = list(line.get_ydata())
-            self.cid = line.figure.canvas.mpl_connect('button_press_event', self)
+            self.cid = line.figure.canvas.mpl_connect('button_press_event',
+                                                      self)
 
         def __call__(self, event):
             if event.inaxes != self.line.axes: return
@@ -43,7 +46,15 @@ def _draw_ROI(denoised, name):
                     self.xs[-1], self.ys[-1] = res.x, res.y
                     roi = roifile.ImagejRoi.frompoints(
                         list(zip(linebuilder.xs, linebuilder.ys)))
-                    roifile.roiwrite('Results/' + name + '.roi', roi)
+
+                    DIR = getcwd() + '/Results/'
+                    FILE = DIR + name + '.roi'
+                    if not (path.exists(DIR) and path.isdir(DIR)):
+                        mkdir(DIR)
+                    if path.exists(FILE):
+                        remove(FILE)
+
+                    roifile.roiwrite(FILE, roi)
                     self.line.figure.canvas.mpl_disconnect(self.cid)
                 except:
                     pass
