@@ -257,11 +257,14 @@ def _compute_convex_hull(thresholded, tolerance=1e-10):
     return mask
 
 
-def filter_labels(labels, thresholded, polygon):
-    # Find convex hull that approximates tissue structure
-    convex_hull = _compute_convex_hull(thresholded)
-    filtered_labels = clear_border(clear_border(labels),
-                                   mask=binary_erosion(convex_hull))
+def filter_labels(labels, thresholded, polygon, prune_3D_borders=True):
+    filtered_labels = clear_border(labels)
+
+    if prune_3D_borders:
+        # Find convex hull that approximates tissue structure
+        convex_hull = _compute_convex_hull(thresholded)
+        filtered_labels = clear_border(filtered_labels,
+                                       mask=binary_erosion(convex_hull))
 
     if polygon is not None:
         if type(polygon) != np.ndarray:
@@ -273,12 +276,12 @@ def filter_labels(labels, thresholded, polygon):
         min_y, max_y = int(min(Y)), int(max(Y) + 1)
         shape = labels.shape
         roi_mask = np.empty(shape)
-        roi_mask[0] = polygon2mask((max_x, max_y),
-                                   list(zip(X, Y)))[min_x:max_x, min_y:max_y].T
+        roi_mask[0] = polygon2mask((max_x, max_y), list(zip(X, Y))
+                                  )[min_x:max_x, min_y:max_y].T
 
         for i in range(1, shape[0]):
             roi_mask[i] = roi_mask[0]
-        filtered_labels = clear_border(clear_border(filtered_labels),
+        filtered_labels = clear_border(filtered_labels,
                                        mask=binary_erosion(roi_mask))
 
     return filtered_labels
