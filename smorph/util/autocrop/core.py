@@ -373,6 +373,12 @@ def export_cells(
         rmtree(OUT_DIR)
     mkdir(OUT_DIR)
 
+    if seg_type == SEG_TYPES[0] or seg_type == SEG_TYPES[2]:
+        mkdir(OUT_DIR + SEG_TYPES[0])
+
+    if seg_type == SEG_TYPES[1] or seg_type == SEG_TYPES[2]:
+        mkdir(OUT_DIR + SEG_TYPES[1])
+
     if img_path.split('.')[-1] == 'tif':
         with tifffile.TiffFile(img_path) as file:
             metadata = file.imagej_metadata
@@ -389,6 +395,20 @@ def export_cells(
             minz, miny, minx, maxz, maxy, maxx = region.bbox
 
             if seg_type == SEG_TYPES[0] or seg_type == SEG_TYPES[2]:
+                segmented = tissue_img[minz:maxz, miny:maxy, minx:maxx].copy()
+                segmented = img_as_ubyte(segmented)
+                segmented[~region.filled_image] = 0
+
+                out = segmented if OUT_TYPE == '3D' else np.pad(
+                    np.max(segmented, 0),
+                    pad_width=max(segmented.shape[1:]) // 5, mode='constant')
+
+                name = (f'{OUT_DIR}{SEG_TYPES[0]}/cell{obj}-({minx},{miny},'
+                        f'{minz}),({maxx},{maxy},{maxz}).tif')
+
+                tifffile.imsave(name, out, description=cell_metadata)
+
+            if seg_type == SEG_TYPES[1] or seg_type == SEG_TYPES[2]:
                 scale_z = (maxz - minz) // 5
                 scale_y = (maxy - miny) // 5
                 scale_x = (maxx - minx) // 5
@@ -402,20 +422,6 @@ def export_cells(
                 segmented = tissue_img[minz:maxz, miny:maxy, minx:maxx].copy()
                 segmented = img_as_ubyte(segmented)
                 out = segmented if OUT_TYPE == '3D' else np.max(segmented, 0)
-
-                name = (f'{OUT_DIR}{SEG_TYPES[0]}/cell{obj}-({minx},{miny},'
-                        f'{minz}),({maxx},{maxy},{maxz}).tif')
-
-                tifffile.imsave(name, out, description=cell_metadata)
-
-            if seg_type == SEG_TYPES[1] or seg_type == SEG_TYPES[2]:
-                segmented = tissue_img[minz:maxz, miny:maxy, minx:maxx].copy()
-                segmented = img_as_ubyte(segmented)
-                segmented[~region.filled_image] = 0
-
-                out = segmented if OUT_TYPE == '3D' else np.pad(
-                    np.max(segmented, 0),
-                    pad_width=max(segmented.shape[1:]) // 5, mode='constant')
 
                 name = (f'{OUT_DIR}{SEG_TYPES[1]}/cell{obj}-({minx},{miny},'
                         f'{minz}),({maxx},{maxy},{maxz}).tif')
