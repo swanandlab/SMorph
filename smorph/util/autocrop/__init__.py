@@ -12,7 +12,6 @@ from .core import (
     extract_obj,
     project_batch,
     export_cells,
-    label_clusters
 )
 
 from ._roi_extract import (
