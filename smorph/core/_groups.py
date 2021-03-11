@@ -1,9 +1,11 @@
+import json
 from collections import defaultdict
 from itertools import cycle
 
 import ipyvolume as ipv
 import matplotlib.pyplot as plt
 import numpy as np
+import tifffile
 from matplotlib.patches import Ellipse
 from pandas import DataFrame
 from pandas.plotting import parallel_coordinates, scatter_matrix
@@ -12,11 +14,7 @@ from seaborn import color_palette
 from sklearn import decomposition, metrics, preprocessing
 from sklearn.cluster import KMeans
 
-from ..util._io import (
-    df_to_csv,
-    read_groups_folders,
-    silent_remove_file
-)
+from ..util._io import df_to_csv, read_groups_folders, silent_remove_file
 from .api import Cell
 
 _ALL_FEATURE_NAMES = (
@@ -295,7 +293,7 @@ class Groups:
         self.markers = None
         self.feature_significance = None
 
-    def plot_avg_sholl_plot(self, save_results=True):
+    def plot_avg_sholl_plot(self, save_results=True, mark_avg_branch_lengths=False):
         """Plots average Sholl Plot
 
         Parameters
@@ -303,6 +301,9 @@ class Groups:
         save_results : bool, optional
             To save a file containing Sholl Plots for each cell,
             by default True
+        mark_avg_branch_lengths : bool, optional
+            To highlight the mean branch length intervals on the X-axis,
+            by default False
 
         """
         file_names = self.file_names
@@ -328,6 +329,25 @@ class Groups:
             e = sem(polynomial_plots[lft_idx: lft_idx + group_cnt], axis=0)
             lft_idx += group_cnt
             plt.errorbar(x, y, yerr=e, label=labels[group_no])
+
+        if mark_avg_branch_lengths:
+            ALPHA = .27
+            branch_lengths = (
+                self.features[_ALL_FEATURE_NAMES[10]].mean(),
+                self.features[_ALL_FEATURE_NAMES[11]].mean(),
+                self.features[_ALL_FEATURE_NAMES[12]].mean(),
+                self.features[_ALL_FEATURE_NAMES[13]].mean(),
+                self.features[_ALL_FEATURE_NAMES[14]].mean()
+            )
+            csum = branch_lengths[0]
+            plt.axvspan(0, csum, color='r', alpha=ALPHA)
+            plt.axvspan(csum, csum + branch_lengths[1], color='b', alpha=ALPHA)
+            csum += branch_lengths[1]
+            plt.axvspan(csum, csum + branch_lengths[2], color='m', alpha=ALPHA)
+            csum += branch_lengths[2]
+            plt.axvspan(csum, csum + branch_lengths[3], color='g', alpha=ALPHA)
+            csum += branch_lengths[3]
+            plt.axvspan(csum, csum + branch_lengths[4], color='c', alpha=ALPHA)
 
         plt.xlabel("Distance from soma")
         plt.ylabel("No. of intersections")
@@ -836,13 +856,19 @@ class Groups:
             df_to_csv(out, '/Results/', 'clustered_cells.csv')
 
         if label_metadata:
-            for row in out.rows:
+            for _, row in out.iterrows():
                 file_name = row['file_name']
                 if file_name.split('.')[-1] == 'tif':
                     with tifffile.TiffFile(file_name) as file:
                         img = file.asarray()
-                        cell_metadata = file.shaped_metadata[0]
-                        cell_metadata['cluster_label'] = out['cluster_label']
-                        tifffile.imsave(file_name, img, metadata=cell_metadata)
+                        try:
+                            cell_metadata = json.loads(
+                                file.pages[0].tags['ImageDescription'].value)
+                        except json.decoder.JSONDecodeError:
+                            cell_metadata = {}
+                        cell_metadata['cluster_label'] = row['cluster_label']
+                        out_metadata = json.dumps(cell_metadata)
+                        tifffile.imsave(file_name, img,
+                                        description=out_metadata)
 
         return centers_df, df, dist
