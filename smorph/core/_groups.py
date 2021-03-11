@@ -644,7 +644,8 @@ class Groups:
         use_features=True,
         n_PC=None,
         plot='parallel',
-        save_results=True
+        save_results=True,
+        label_metadata=True
     ):
         """
         Highly configurable K-Means clustering & visualization of cell data.
@@ -664,6 +665,8 @@ class Groups:
             The type of plot user would like to get, either parallel or scatter.
         save_results : bool, optional
             To save a file containing clustering results, by default True
+        label_metadata : bool, optional
+            To append cluster labels in metadata of cell images, by default True
 
         Returns
         -------
@@ -752,13 +755,13 @@ class Groups:
         # creates a dataframe with a column for cluster number
         centers_df = DataFrame(kmeans_model.cluster_centers_,
                                columns=COLUMN_NAMES)
-        centers_df['cluster'] = range(k)
+        centers_df['cluster_label'] = range(k)
 
         LABEL_COLOR_MAP = color_palette(None, k)
 
         def parallel_plot(data):
             plt.figure(figsize=(15, 8)).gca().axes.set_ylim([-3, 3])
-            parallel_coordinates(data, 'cluster',
+            parallel_coordinates(data, 'cluster_label',
                                  color=LABEL_COLOR_MAP, marker='o')
             plt.xticks(rotation=90)
 
@@ -816,7 +819,7 @@ class Groups:
         group_cnts.insert(0, 0)
         group_pos = np.cumsum(group_cnts)
 
-        df['cluster'] = kmeans_model.labels_
+        df['cluster_label'] = kmeans_model.labels_
         dist = DataFrame()
 
         for idx, r_pos in enumerate(group_pos):
@@ -824,11 +827,22 @@ class Groups:
                 continue
             l_pos = group_pos[idx - 1]
             dist[self.labels[idx - 1]] = (
-                df['cluster'][l_pos: r_pos].value_counts())
+                df['cluster_label'][l_pos: r_pos].value_counts())
+
+        out = DataFrame(self.file_names, columns=['file_name'])
+        out[df.columns] = df
 
         if save_results:
-            out = DataFrame(self.file_names, columns=['file_name'])
-            out[df.columns] = df
             df_to_csv(out, '/Results/', 'clustered_cells.csv')
+
+        if label_metadata:
+            for row in out.rows:
+                file_name = row['file_name']
+                if file_name.split('.')[-1] == 'tif':
+                    with tifffile.TiffFile(file_name) as file:
+                        img = file.asarray()
+                        cell_metadata = file.shaped_metadata[0]
+                        cell_metadata['cluster_label'] = out['cluster_label']
+                        tifffile.imsave(file_name, img, metadata=cell_metadata)
 
         return centers_df, df, dist
