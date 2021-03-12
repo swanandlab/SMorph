@@ -1,6 +1,7 @@
 import json
-from collections import defaultdict
 from itertools import cycle
+from os import getcwd, mkdir, path
+from shutil import rmtree
 
 import ipyvolume as ipv
 import matplotlib.pyplot as plt
@@ -665,7 +666,8 @@ class Groups:
         n_PC=None,
         plot='parallel',
         save_results=True,
-        label_metadata=True
+        label_metadata=True,
+        export_clustered_cells=False
     ):
         """
         Highly configurable K-Means clustering & visualization of cell data.
@@ -870,5 +872,30 @@ class Groups:
                         out_metadata = json.dumps(cell_metadata)
                         tifffile.imsave(file_name, img,
                                         description=out_metadata)
+
+        if export_clustered_cells:
+            DIR = getcwd() + '/Results/clustered_cells/'
+            if path.exists(DIR) and path.isdir(DIR):
+                rmtree(DIR)
+            mkdir(DIR)
+            CLUSTER_DIRS = map(str, np.unique(kmeans_model.labels_).tolist())
+            for cluster_dir in CLUSTER_DIRS:
+                mkdir(DIR + cluster_dir)
+
+            for _, row in out.iterrows():
+                file_path = row['file_name']
+                if file_path.split('.')[-1] == 'tif':
+                    with tifffile.TiffFile(file_path) as file:
+                        name = file_path.split('/')[-1]
+                        img = file.asarray()
+                        try:
+                            cell_metadata = json.loads(
+                                file.pages[0].tags['ImageDescription'].value)
+                        except json.decoder.JSONDecodeError:
+                            cell_metadata = {}
+                        out_metadata = json.dumps(cell_metadata)
+                        tifffile.imsave(DIR + str(row['cluster_label']) \
+                                            + '/' + name,
+                                        img, description=out_metadata)
 
         return centers_df, df, dist
