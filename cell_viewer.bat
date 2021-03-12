@@ -1,5 +1,11 @@
 @echo off
 title Cell Viewer
-ECHO "%~1"
-python "C:\Users\Kushaan Gupta\Desktop\swanandLab\projects\SMorph\SMorph\cell_viewer.py" "%~1"
+FOR %%I IN (%*) DO (
+    ECHO.%%~aI | FIND "d" >NUL
+    IF ERRORLEVEL 1 (
+        REM Processing Dropped Files
+        ECHO "%%~fI"
+    )
+)
+python "%~dp0/cell_viewer.py" %*
 pause

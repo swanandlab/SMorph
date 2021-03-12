@@ -6,7 +6,6 @@ from smorph.util import viewer as vw
 
 
 try:
-    droppedFile = sys.argv[1]
-    vw.identify_cell_in_tissue(droppedFile)
+    vw.identify_cells_in_tissue(sys.argv[1:])
 except IndexError:
     print("No file dropped")
