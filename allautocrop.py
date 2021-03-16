@@ -1,19 +1,24 @@
 import smorph.util.autocrop as ac
 from os import getcwd, listdir, mkdir, path
 from time import time
+from skimage.filters import threshold_otsu
+import csv
+import json
 
 ROOT = 'Datasets'
 
 SECTIONS = [
-    'autocrop'
-    # 'FLX_CZI/SC109.3M_1_SINGLE MARK_FLX_21 DAY',
-    # 'FLX_CZI/SC110.1M_2_DOUBLE MARK_FLX_21 DAY',
-    # 'FLX_CZI/UN1_2_DOUBLE MARK_FLX_21 DAY',
-    # 'FLX_CZI/UN2_3_UNMARKED_FLX_21 DAY'
+    'CMUS FOR AUTOCROP/img'
 ]
 
-LOW_THRESH = .07
-HIGH_THRESH = .3
+params = {'LOW_THRESH': .075,
+          'HIGH_THRESH': .3,
+          'SELECT_ROI': True,
+          'NAME_ROI': 'ML',
+          'LOW_VOLUME_CUTOFF': 300,  # filter noise/artifacts
+          'HIGH_VOLUME_CUTOFF': 1e9,  # filter cell clusters
+          'OUTPUT_OPTION': 1  # 0 for 3D cells, 1 for Max Intensity Projections
+}
 
 # ROI_FILE = r'crop manual\M3_LEFT_ML_CELL CROP\RoiSet_LB_CELLS.zip'
 # rois = read_roi_zip(ROI_FILE)
@@ -30,7 +35,7 @@ for section in SECTIONS:
         if not file.startswith('.'):  # skip hidden files
             try:
                 CONFOCAL_TISSUE_IMAGE = ROOT + '/' + section + '/' + file
-
+ 
                 original = ac.import_confocal_image(CONFOCAL_TISSUE_IMAGE)
 
                 # ## 2. Non-local means denoising using auto-calibrated parameters
@@ -38,34 +43,46 @@ for section in SECTIONS:
                 denoise_parameters = denoiser.keywords['denoiser_kwargs']
                 denoised = ac.denoise(original, denoise_parameters)
 
-                SELECT_ROI = False
-                NAME_ROI = ''
-                FILE_ROI = None # CONFOCAL_TISSUE_IMAGE.replace(CONFOCAL_TISSUE_IMAGE.split('/')[1], 'ISOPROTERENOLroi')[:-4] + '-ML.roi'
-                print(CONFOCAL_TISSUE_IMAGE)
+                # mid = denoised.shape[0] // 2
+                # p25 = mid // 2
+                # p75 = mid + p25
+                # LOW_THRESH = (threshold_otsu(denoised[p25]) + threshold_otsu(denoised[mid]) + \
+                #               threshold_otsu(denoised[p75])) / 3
+                # print(LOW_THRESH)
 
-                NAME_ROI = NAME_ROI if SELECT_ROI else ''
+                FILE_ROI = CONFOCAL_TISSUE_IMAGE.replace(CONFOCAL_TISSUE_IMAGE.split('/')[2], 'roi')[:-4] + '-UBml.roi'
+                # FILE_ROI = FILE_ROI.replace(FILE_ROI.split('/')[-1], 'RoiSet MAX_' + FILE_ROI.split('/')[-1])
+                print(FILE_ROI)
+
+                params['NAME_ROI'] = params['NAME_ROI'] if params['SELECT_ROI'] else ''
                 IMG_NAME = '.'.join(CONFOCAL_TISSUE_IMAGE.split('/')[-1].split('.')[:-1])
-                linebuilder = None if not SELECT_ROI else ac.select_ROI(denoised, IMG_NAME + '-' + NAME_ROI, FILE_ROI)
+                linebuilder = None if not params['SELECT_ROI'] else ac.select_ROI(denoised, IMG_NAME + '-' + params['NAME_ROI'], FILE_ROI)
 
-                if SELECT_ROI:
+                if params['SELECT_ROI']:
                     original, denoised = ac.mask_ROI(original, denoised, linebuilder)
 
-                # ## 3. Segmentation
-                thresholded = ac.threshold(denoised, LOW_THRESH, HIGH_THRESH)
+
+                ## 3. Segmentation
+                thresholded = ac.threshold(denoised, params['LOW_THRESH'], params['HIGH_THRESH'])
                 labels = ac.label_thresholded(thresholded)
 
                 # ### 3.2 Filter segmented individual cells by removing ones in borders (touching the convex hull)
                 # discard objects connected to border of approximated tissue, potential partially captured
-                filtered_labels = ac.filter_labels(labels, thresholded, linebuilder, False)
+                filtered_labels = ac.filter_labels(labels, thresholded, linebuilder, prune_3D_borders=True)
 
                 regions = ac.arrange_regions(filtered_labels)
 
-                LOW_VOLUME_CUTOFF = 400  # filter noise/artifacts
-                HIGH_VOLUME_CUTOFF = 1e9  # filter cell clusters
-
-                OUTPUT_OPTION = 1  # 0 for 3D cells, 1 for Max Intensity Projections
-
-                ac.export_cells(CONFOCAL_TISSUE_IMAGE, LOW_VOLUME_CUTOFF, HIGH_VOLUME_CUTOFF, OUTPUT_OPTION, original, regions, NAME_ROI, linebuilder)
+                ac.export_cells(CONFOCAL_TISSUE_IMAGE, params['LOW_VOLUME_CUTOFF'], params['HIGH_VOLUME_CUTOFF'],
+                                params['OUTPUT_OPTION'], original, regions, params['NAME_ROI'], linebuilder, seg_type='both')
+    
+                DIR = getcwd() + '/Autocropped/'
+                IMAGE_NAME = '.'.join(path.basename(CONFOCAL_TISSUE_IMAGE).split('.')[:-1])
+                OUT_TYPE = ('3D', 'MIP')[params['OUTPUT_OPTION']]
+                NAME_ROI = params['NAME_ROI']
+                OUT_DIR = DIR + IMAGE_NAME + \
+                        f'{"" if NAME_ROI == "" else "-" + str(NAME_ROI)}_{OUT_TYPE}/'
+                with open(OUT_DIR + '.params.json', 'w') as out:
+                    json.dump(params, out)
             except Exception as e:
                 print(str(e))
 

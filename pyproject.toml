@@ -22,6 +22,8 @@ napari = "^0.3.8"
 tifffile = "2020.9.3"
 czifile = "^2019.7.2"
 roifile = "2020.8.13"
+shapely = "^1.7.1"
+uuid = "^1.30"
 
 [tool.poetry.dev-dependencies]
 

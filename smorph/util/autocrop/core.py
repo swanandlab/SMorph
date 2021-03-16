@@ -2,7 +2,6 @@ import json
 import uuid
 from os import getcwd, mkdir, path
 from shutil import rmtree
-import random
 import matplotlib.pyplot as plt
 import numpy as np
 import skimage.io as io
@@ -88,7 +87,7 @@ def projectXYZ(img, voxel_sz_x, voxel_sz_y, voxel_sz_z, cmap='gray'):
     plt.show()
 
 
-def import_confocal_image(img_path):
+def import_confocal_image(img_path, channel_interest=0):
     """Loads the 3D confocal image.
 
     - Tested on: CZI, LSM, TIFF
@@ -97,19 +96,28 @@ def import_confocal_image(img_path):
     ----------
     img_path : str
         Path to the confocal tissue image.
+    channel_interest : int
+        Channel of interest containing image data to be processed,
+        by default 0
 
     """
     # image has to be converted to float for processing
     if img_path.split('.')[-1] == 'czi':
         img = czifile.imread(img_path)
         img = img.data
-        img = img_as_float(np.squeeze(img)[0])
+        img = img_as_float(np.squeeze(img))
+        if img.ndim > 3:
+            img = img[channel_interest]
     elif img_path.split('.')[-1] == 'lsm':
         img = tifffile.imread(img_path)
-        img = img.data
-        img = img_as_float(img)[0, :, 0]
+        img = img_as_float(np.squeeze(img))
+        if img.ndim > 3:
+            img = img[:, channel_interest]
     else:
-        img = img_as_float(io.imread(img_path))
+        img = np.squeeze(io.imread(img_path))
+        img = img_as_float(img)
+        if img.ndim > 3:
+            img = img[channel_interest]
 
     return img
 
@@ -423,8 +431,8 @@ def export_cells(
                 out = segmented if OUT_TYPE == '3D' else np.pad(
                     np.max(segmented, 0),
                     pad_width=max(segmented.shape[1:]) // 5, mode='constant')
-                name = f'{OUT_DIR}{SEG_TYPES[0]}/' + name
-                tifffile.imsave(name, out, description=out_metadata,
+                out_name = f'{OUT_DIR}{SEG_TYPES[0]}/' + name
+                tifffile.imsave(out_name, out, description=out_metadata,
                                 software='Autocrop')
 
             if seg_type == SEG_TYPES[1] or seg_type == SEG_TYPES[2]:
@@ -441,6 +449,6 @@ def export_cells(
                 segmented = tissue_img[minz:maxz, miny:maxy, minx:maxx].copy()
                 segmented = img_as_ubyte(segmented)
                 out = segmented if OUT_TYPE == '3D' else np.max(segmented, 0)
-                name = f'{OUT_DIR}{SEG_TYPES[1]}/' + name
-                tifffile.imsave(name, out, description=out_metadata,
+                out_name = f'{OUT_DIR}{SEG_TYPES[1]}/' + name
+                tifffile.imsave(out_name, out, description=out_metadata,
                                 software='Autocrop')
