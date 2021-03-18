@@ -21,8 +21,8 @@ def _read_images(files, prefix=''):
             metadata = tifffile.TiffFile(name).pages[
                             0].tags['ImageDescription'].value
             metadata = json.loads(metadata)
-            if 'cluster_label' not in metadata.keys():
-                continue
+            # if 'cluster_label' not in metadata.keys():
+                # continue
             metadata['name'] = name
 
             if metadata['parent_image'] in dataset:
@@ -97,7 +97,8 @@ def _get_roi_scaled_points(data):
             cell_data['bounds'][5] += cell_data['roi'][1]
         centroid_pts.append(cell_data['centroid'])
         bounds.append(cell_data['bounds'])
-        cluster_labels.append(cell_data['cluster_label'])
+        if 'cluster_label' in cell_data.keys():
+            cluster_labels.append(cell_data['cluster_label'])
     return bounds, centroid_pts, cluster_labels
 
 
@@ -208,6 +209,8 @@ def _identify_cell_in_tissue(img_path):
         viewer.add_image(img*mask, colormap='inferno',
                          blending='additive', name='bbox_segmented')
 
+        if len(cluster_labels) == 0:
+            cluster_labels = [1]
         props = {'cluster_labels': np.array(cluster_labels)}
         viewer.add_points(centroid_pts, edge_color='transparent',
                           face_color='transparent',
@@ -254,6 +257,8 @@ def _label_cells_in_tissue(
             name='bbox_' + name
         )
 
+    if len(cluster_labels) == 0:
+        cluster_labels = [1]*len(bounds)
     props = {'cluster_labels': np.array(cluster_labels)}
     viewer.add_points(centroid_pts, edge_color='transparent',
                       face_color='transparent',
