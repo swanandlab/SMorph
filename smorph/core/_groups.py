@@ -14,6 +14,7 @@ from scipy.stats import sem
 from seaborn import color_palette
 from sklearn import decomposition, metrics, preprocessing
 from sklearn.cluster import KMeans
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
 
 from ..util._io import df_to_csv, read_groups_folders, silent_remove_file
 from .api import Cell
@@ -899,3 +900,111 @@ class Groups:
                                         img, description=out_metadata)
 
         return centers_df, df, dist
+
+    def lda(
+        self,
+        n_components,
+        cluster_labels,
+        on_features=None
+    ):
+        """Linear Discriminant Analysis of morphological features of cells.
+
+        Parameters
+        ----------
+        n_components : int
+            Number of components (<= min(n_classes - 1, n_features)) for
+            dimensionality reduction. If None, will be set to
+            min(n_classes - 1, n_features).
+        on_features : list, optional
+            List of names of morphological features from which LDA
+            Components will be derived, by default None.
+            If None, all 23 morphological features will be used.
+
+        Returns
+        -------
+        feature_significance : ndarray
+            Eigenvectors of each Component.
+        covariance_matix : ndarray
+            Data covariance computed via generative model.
+        vars : ndarray
+            Captured variance ratios of each Component.
+
+        Raises
+        ------
+        ValueError
+            * If n_PC isn't greater than 1 & less than the total number of
+            morphological features of cells.
+            * If element(s) of on_features is/are not in list of all
+            morphological features.
+
+        """
+        all_features = list(_ALL_FEATURE_NAMES)
+        labels = iter(self.labels.values())
+
+        if on_features is None:
+            on_features = all_features
+        elif not all(feature in all_features for feature in set(on_features)):
+            raise ValueError('Selected features are not a subset '
+                             'of the original set of morphological features.')
+
+        self.pca_feature_names = on_features
+        markers = iter(self.markers.values())
+
+        subset_features = self.features[on_features].to_numpy()
+
+        lda_object = LDA(n_components=n_components, store_covariance=True)
+
+        # Scale data
+        scaler = preprocessing.MaxAbsScaler()
+        scaler.fit(subset_features)
+        X = scaler.transform(subset_features)
+
+        # fit on data
+        lda_object.fit(X, cluster_labels)
+
+        # access values and vectors
+        feature_significance = lda_object.coef_
+
+        # variance captured by components
+        vars = lda_object.explained_variance_ratio_
+
+        # transform data
+        projected = lda_object.transform(X)
+
+        def visualize_two_components():
+            C_1 = projected[:, 0]
+            C_2 = projected[:, 1]
+
+            l_idx = r_idx = 0
+            LABEL_COLOR_MAP = color_palette(None, n_components)
+            label_color = [LABEL_COLOR_MAP[l] for l in cluster_labels]
+            group_cnts = self.group_counts.copy()
+
+            centers = lda_object.transform(lda_object.means_)
+
+            for i in range(n_components):
+                plt.text(centers[i, 0], centers[i, 1], i, weight='bold',
+                         size=10, backgroundcolor=LABEL_COLOR_MAP[i],
+                         color='white')
+
+            for cells in group_cnts:
+                r_idx += cells
+                plt.scatter(C_1[l_idx:r_idx], C_2[l_idx:r_idx], 40,
+                            label_color[l_idx:r_idx], next(markers),
+                            label=next(labels), alpha=.65)
+                l_idx += cells
+
+            plt.legend(title='Groups')
+            plt.title('First two Components')
+            plt.xlabel(f'C 1 (Variance: {vars[0]*100:.1f})', fontsize=14)
+            plt.ylabel(f'C 2 (Variance: {vars[1]*100:.1f})', fontsize=14)
+            plt.show()
+
+        visualize_two_components()
+
+        self.feature_significance = feature_significance
+        self.projected = projected
+        feature_significance = lda_object.coef_
+        covariance_matix = lda_object.covariance_
+
+        return feature_significance, covariance_matix, vars
