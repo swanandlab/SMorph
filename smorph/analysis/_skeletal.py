@@ -134,8 +134,8 @@ def pad_skeleton(cell_skeleton, soma_on_skeleton):
     skeleton_indices = np.nonzero(cell_skeleton)
 
     # get corner points enclosing skeleton
-    x_min, x_max = min(skeleton_indices[1]), max(skeleton_indices[1])
-    y_min, y_max = min(skeleton_indices[0]), max(skeleton_indices[0])
+    x_min, x_max = min(skeleton_indices[1]), max(skeleton_indices[1]) + 1
+    y_min, y_max = min(skeleton_indices[0]), max(skeleton_indices[0]) + 1
     bounded_skeleton = cell_skeleton[y_min:y_max, x_min:x_max]
 
     pad_width = max(bounded_skeleton.shape)//2
