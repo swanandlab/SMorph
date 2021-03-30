@@ -73,7 +73,7 @@ for section in SECTIONS:
                 regions = ac.arrange_regions(filtered_labels)
 
                 ac.export_cells(CONFOCAL_TISSUE_IMAGE, params['LOW_VOLUME_CUTOFF'], params['HIGH_VOLUME_CUTOFF'],
-                                params['OUTPUT_OPTION'], original, regions, params['NAME_ROI'], linebuilder, seg_type='both')
+                                params['OUTPUT_OPTION'], denoised, regions, params['NAME_ROI'], linebuilder, seg_type='both')
     
                 DIR = getcwd() + '/Autocropped/'
                 IMAGE_NAME = '.'.join(path.basename(CONFOCAL_TISSUE_IMAGE).split('.')[:-1])
