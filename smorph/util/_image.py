@@ -91,6 +91,8 @@ def try_all_threshold(img, contrast_ptiles=(0, 100), figsize=(10, 6)):
 
     """
     contrast_ptiles, _ = _validate_img_args('auto', contrast_ptiles, 'li')
+    if len(img.shape) == 3 and img.shape[2] == 3:
+        img = rgb2gray(img)
     img_rescale = _contrast_stretching(img, contrast_ptiles)
     filters.try_all_threshold(img_rescale, figsize, False)
     show()
@@ -144,7 +146,15 @@ def preprocess_image(
                                          threshold_method)
     cleaned_image = _remove_small_object_noise(thresholded_image)
     cleaned_image_filled_holes = _fill_holes(cleaned_image)
-    return cleaned_image_filled_holes
+
+    # Auto-contrast stretching aiding soma detection
+    masked_image = cleaned_image_filled_holes * image
+    min_intensity, max_intensity = masked_image.min(), masked_image.max()
+    image[image < min_intensity] = min_intensity
+    image[image > max_intensity] = max_intensity
+    image = (image - min_intensity) / (max_intensity - min_intensity)
+
+    return image, cleaned_image_filled_holes
 
 
 def _threshold_image(

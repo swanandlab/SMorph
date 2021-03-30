@@ -1,7 +1,15 @@
+from errno import ENOENT
 from os import getcwd, listdir, mkdir, path, remove
-from pickle import dump
 
 import skimage.io as io
+
+
+def silent_remove_file(filename):
+    try:
+        remove(filename)
+    except OSError as e:
+        if e.errno != ENOENT:
+            raise
 
 
 def read_groups_folders(groups_folders):
@@ -56,27 +64,3 @@ def df_to_csv(df, folder, out_file_name):
         remove(FILE)
 
     df.to_csv(DIR + out_file_name, index=False, mode='w')
-
-
-def dict_to_pickle(data, folder, out_file_name):
-    """Export a Python dictionary to a pickle file.
-
-    Parameters
-    ----------
-    data : dict
-        Data to export into file.
-    folder : str
-        Name of the folder in which the exported file will reside.
-    out_file_name : str
-        Name of the file to export with extension.
-
-    """
-    DIR = getcwd() + folder
-    FILE = DIR + out_file_name
-    if not (path.exists(DIR) and path.isdir(DIR)):
-        mkdir(DIR)
-    if path.exists(FILE):
-        remove(FILE)
-
-    with open(DIR + out_file_name, 'wb') as file:
-        dump(data, file, -1)

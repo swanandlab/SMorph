@@ -1,18 +1,22 @@
-from collections import defaultdict
+import json
 from itertools import cycle
+from os import getcwd, mkdir, path
+from shutil import rmtree
 
 import ipyvolume as ipv
 import matplotlib.pyplot as plt
 import numpy as np
+import tifffile
 from matplotlib.patches import Ellipse
 from pandas import DataFrame
-from pandas.plotting import parallel_coordinates
+from pandas.plotting import parallel_coordinates, scatter_matrix
 from scipy.stats import sem
 from seaborn import color_palette
 from sklearn import decomposition, metrics, preprocessing
 from sklearn.cluster import KMeans
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
 
-from ..util._io import df_to_csv, dict_to_pickle, read_groups_folders
+from ..util._io import df_to_csv, read_groups_folders, silent_remove_file
 from .api import Cell
 
 _ALL_FEATURE_NAMES = (
@@ -106,6 +110,7 @@ def _analyze_cells(
 
     """
     file_names, dataset = read_groups_folders(groups_folders)
+    SKIPPED_CELLS_FILENAME = 'skipped_cells.txt'
 
     dataset_features, targets = [], []
 
@@ -123,6 +128,8 @@ def _analyze_cells(
     if type(groups_crop_tech) == str:
         groups_crop_tech = [groups_crop_tech for i in range(N_GROUPS)]
 
+    silent_remove_file(SKIPPED_CELLS_FILENAME)
+
     for group_no, group in enumerate(dataset):
         group_cell_cnt = 0
         for cell_image in group:
@@ -138,6 +145,12 @@ def _analyze_cells(
                             shell_step_size=shell_step_sz,
                             polynomial_degree=poly_degree)
                 cell_features = list(cell.features.values())
+
+                for feature in cell_features:
+                    if feature is None:
+                        raise RuntimeError('Illegal morphological '
+                                           'features extracted!')
+
                 group_cell_cnt += 1
 
                 targets.append(group_no)
@@ -152,6 +165,8 @@ def _analyze_cells(
                 bad_cells_idx.append(cell_cnt - 1)
                 print('Warning: Skipping analysis of',
                       f'"{file_names[cell_cnt - 1]}" due to {err}.')
+                with open(SKIPPED_CELLS_FILENAME, 'a') as skip_file:
+                    skip_file.write(file_names[cell_cnt - 1] + '\n')
 
         group_cnts.append(group_cell_cnt)
 
@@ -280,7 +295,7 @@ class Groups:
         self.markers = None
         self.feature_significance = None
 
-    def plot_avg_sholl_plot(self, save_results=True):
+    def plot_avg_sholl_plot(self, save_results=True, mark_avg_branch_lengths=False):
         """Plots average Sholl Plot
 
         Parameters
@@ -288,6 +303,9 @@ class Groups:
         save_results : bool, optional
             To save a file containing Sholl Plots for each cell,
             by default True
+        mark_avg_branch_lengths : bool, optional
+            To highlight the mean branch length intervals on the X-axis,
+            by default False
 
         """
         file_names = self.file_names
@@ -314,6 +332,25 @@ class Groups:
             lft_idx += group_cnt
             plt.errorbar(x, y, yerr=e, label=labels[group_no])
 
+        if mark_avg_branch_lengths:
+            ALPHA = .27
+            branch_lengths = (
+                self.features[_ALL_FEATURE_NAMES[10]].mean(),
+                self.features[_ALL_FEATURE_NAMES[11]].mean(),
+                self.features[_ALL_FEATURE_NAMES[12]].mean(),
+                self.features[_ALL_FEATURE_NAMES[13]].mean(),
+                self.features[_ALL_FEATURE_NAMES[14]].mean()
+            )
+            csum = branch_lengths[0]
+            plt.axvspan(0, csum, color='r', alpha=ALPHA)
+            plt.axvspan(csum, csum + branch_lengths[1], color='b', alpha=ALPHA)
+            csum += branch_lengths[1]
+            plt.axvspan(csum, csum + branch_lengths[2], color='m', alpha=ALPHA)
+            csum += branch_lengths[2]
+            plt.axvspan(csum, csum + branch_lengths[3], color='g', alpha=ALPHA)
+            csum += branch_lengths[3]
+            plt.axvspan(csum, csum + branch_lengths[4], color='c', alpha=ALPHA)
+
         plt.xlabel("Distance from soma")
         plt.ylabel("No. of intersections")
         plt.legend()
@@ -330,6 +367,35 @@ class Groups:
             df_polynomial_plots = DataFrame(polynomial_plots, columns=cols)
             write_buffer[df_polynomial_plots.columns] = df_polynomial_plots
             df_to_csv(write_buffer, DIR, OUTFILE)
+
+    def plot_feature_scatter_matrix(self, on_features):
+        """Plot feature scatter matrix.
+
+        Parameters
+        ----------
+        on_features : list, optional
+            List of names of morphological features using which
+            scatter matrix will be plotted, by default None.
+            If None, all 23 morphological features will be used.
+
+        """
+        if on_features is None:
+            on_features = list(_ALL_FEATURE_NAMES)
+
+        subset_features = self.features[on_features]
+
+        scaler = preprocessing.MinMaxScaler()
+        scaler.fit(subset_features)
+        X = DataFrame(scaler.transform(subset_features), columns=on_features)
+
+        axis = scatter_matrix(X, figsize=(18, 18))
+        for ax in axis.flatten():
+            ax.xaxis.label.set_rotation(30)
+            ax.xaxis.label.set_ha('right')
+            ax.yaxis.label.set_rotation(45)
+            ax.yaxis.label.set_ha('right')
+
+        plt.show()
 
     def pca(
         self,
@@ -414,7 +480,7 @@ class Groups:
 
         subset_features = self.features[on_features].to_numpy()
 
-        pca_object = decomposition.PCA(n_PC)
+        pca_object = decomposition.PCA(n_PC, svd_solver='arpack')
 
         # Scale data
         scaler = preprocessing.MaxAbsScaler()
@@ -486,7 +552,7 @@ class Groups:
         return feature_significance, covariance_matix, var_PCs
 
     def plot_feature_histograms(self, features=list(_ALL_FEATURE_NAMES)):
-        """Plots feature significance heatmap.
+        """Plots feature histograms for groups.
 
         Raises
         ------
@@ -549,7 +615,10 @@ class Groups:
         sorted_feature_names = np.array(self.pca_feature_names)[
             significance_order_PC_1]
 
-        plt.matshow(np.array(sorted_feature_significance), cmap='gist_heat')
+        data = np.array(sorted_feature_significance)
+        plt.matshow(data, cmap='bwr')
+        for (i, j), z in np.ndenumerate(data):
+            plt.text(j, i, f'{z:.1f}', ha='center', va='center')
         plt.yticks(list(range(n_PC)), [
             f'PC {i+1}' for i in range(n_PC)], fontsize=10)
         plt.colorbar(orientation='horizontal')
@@ -597,7 +666,9 @@ class Groups:
         use_features=True,
         n_PC=None,
         plot='parallel',
-        save_results=True
+        save_results=True,
+        label_metadata=True,
+        export_clustered_cells=False
     ):
         """
         Highly configurable K-Means clustering & visualization of cell data.
@@ -617,6 +688,8 @@ class Groups:
             The type of plot user would like to get, either parallel or scatter.
         save_results : bool, optional
             To save a file containing clustering results, by default True
+        label_metadata : bool, optional
+            To append cluster labels in metadata of cell images, by default True
 
         Returns
         -------
@@ -705,13 +778,13 @@ class Groups:
         # creates a dataframe with a column for cluster number
         centers_df = DataFrame(kmeans_model.cluster_centers_,
                                columns=COLUMN_NAMES)
-        centers_df['cluster'] = range(k)
+        centers_df['cluster_label'] = range(k)
 
         LABEL_COLOR_MAP = color_palette(None, k)
 
         def parallel_plot(data):
             plt.figure(figsize=(15, 8)).gca().axes.set_ylim([-3, 3])
-            parallel_coordinates(data, 'cluster',
+            parallel_coordinates(data, 'cluster_label',
                                  color=LABEL_COLOR_MAP, marker='o')
             plt.xticks(rotation=90)
 
@@ -769,7 +842,7 @@ class Groups:
         group_cnts.insert(0, 0)
         group_pos = np.cumsum(group_cnts)
 
-        df['cluster'] = kmeans_model.labels_
+        df['cluster_label'] = kmeans_model.labels_
         dist = DataFrame()
 
         for idx, r_pos in enumerate(group_pos):
@@ -777,7 +850,54 @@ class Groups:
                 continue
             l_pos = group_pos[idx - 1]
             dist[self.labels[idx - 1]] = (
-                df['cluster'][l_pos: r_pos].value_counts())
+                df['cluster_label'][l_pos: r_pos].value_counts())
+
+        out = DataFrame(self.file_names, columns=['file_name'])
+        out[df.columns] = df
+
+        if save_results:
+            df_to_csv(out, '/Results/', 'clustered_cells.csv')
+
+        if label_metadata:
+            for _, row in out.iterrows():
+                file_name = row['file_name']
+                if file_name.split('.')[-1] == 'tif':
+                    with tifffile.TiffFile(file_name) as file:
+                        img = file.asarray()
+                        try:
+                            cell_metadata = json.loads(
+                                file.pages[0].tags['ImageDescription'].value)
+                        except json.decoder.JSONDecodeError:
+                            cell_metadata = {}
+                        cell_metadata['cluster_label'] = row['cluster_label']
+                        out_metadata = json.dumps(cell_metadata)
+                        tifffile.imsave(file_name, img,
+                                        description=out_metadata)
+
+        if export_clustered_cells:
+            DIR = getcwd() + '/Results/clustered_cells/'
+            if path.exists(DIR) and path.isdir(DIR):
+                rmtree(DIR)
+            mkdir(DIR)
+            CLUSTER_DIRS = map(str, np.unique(kmeans_model.labels_).tolist())
+            for cluster_dir in CLUSTER_DIRS:
+                mkdir(DIR + cluster_dir)
+
+            for _, row in out.iterrows():
+                file_path = row['file_name']
+                if file_path.split('.')[-1] == 'tif':
+                    with tifffile.TiffFile(file_path) as file:
+                        name = file_path.split('/')[-1]
+                        img = file.asarray()
+                        try:
+                            cell_metadata = json.loads(
+                                file.pages[0].tags['ImageDescription'].value)
+                        except json.decoder.JSONDecodeError:
+                            cell_metadata = {}
+                        out_metadata = json.dumps(cell_metadata)
+                        tifffile.imsave(DIR + str(row['cluster_label']) \
+                                            + '/' + name,
+                                        img, description=out_metadata)
 
         if save_results:
             out = DataFrame(self.file_names, columns=['file_name'])
@@ -785,3 +905,111 @@ class Groups:
             df_to_csv(out, '/Results/', 'clustered_cells.csv')
 
         return centers_df, df, dist
+
+    def lda(
+        self,
+        n_components,
+        cluster_labels,
+        on_features=None
+    ):
+        """Linear Discriminant Analysis of morphological features of cells.
+
+        Parameters
+        ----------
+        n_components : int
+            Number of components (<= min(n_classes - 1, n_features)) for
+            dimensionality reduction. If None, will be set to
+            min(n_classes - 1, n_features).
+        on_features : list, optional
+            List of names of morphological features from which LDA
+            Components will be derived, by default None.
+            If None, all 23 morphological features will be used.
+
+        Returns
+        -------
+        feature_significance : ndarray
+            Eigenvectors of each Component.
+        covariance_matix : ndarray
+            Data covariance computed via generative model.
+        vars : ndarray
+            Captured variance ratios of each Component.
+
+        Raises
+        ------
+        ValueError
+            * If n_PC isn't greater than 1 & less than the total number of
+            morphological features of cells.
+            * If element(s) of on_features is/are not in list of all
+            morphological features.
+
+        """
+        all_features = list(_ALL_FEATURE_NAMES)
+        labels = iter(self.labels.values())
+
+        if on_features is None:
+            on_features = all_features
+        elif not all(feature in all_features for feature in set(on_features)):
+            raise ValueError('Selected features are not a subset '
+                             'of the original set of morphological features.')
+
+        self.pca_feature_names = on_features
+        markers = iter(self.markers.values())
+
+        subset_features = self.features[on_features].to_numpy()
+
+        lda_object = LDA(n_components=n_components, store_covariance=True)
+
+        # Scale data
+        scaler = preprocessing.MaxAbsScaler()
+        scaler.fit(subset_features)
+        X = scaler.transform(subset_features)
+
+        # fit on data
+        lda_object.fit(X, cluster_labels)
+
+        # access values and vectors
+        feature_significance = lda_object.coef_
+
+        # variance captured by components
+        vars = lda_object.explained_variance_ratio_
+
+        # transform data
+        projected = lda_object.transform(X)
+
+        def visualize_two_components():
+            C_1 = projected[:, 0]
+            C_2 = projected[:, 1]
+
+            l_idx = r_idx = 0
+            LABEL_COLOR_MAP = color_palette(None, n_components)
+            label_color = [LABEL_COLOR_MAP[l] for l in cluster_labels]
+            group_cnts = self.group_counts.copy()
+
+            centers = lda_object.transform(lda_object.means_)
+
+            for i in range(n_components):
+                plt.text(centers[i, 0], centers[i, 1], i, weight='bold',
+                         size=10, backgroundcolor=LABEL_COLOR_MAP[i],
+                         color='white')
+
+            for cells in group_cnts:
+                r_idx += cells
+                plt.scatter(C_1[l_idx:r_idx], C_2[l_idx:r_idx], 40,
+                            label_color[l_idx:r_idx], next(markers),
+                            label=next(labels), alpha=.65)
+                l_idx += cells
+
+            plt.legend(title='Groups')
+            plt.title('First two Components')
+            plt.xlabel(f'C 1 (Variance: {vars[0]*100:.1f})', fontsize=14)
+            plt.ylabel(f'C 2 (Variance: {vars[1]*100:.1f})', fontsize=14)
+            plt.show()
+
+        visualize_two_components()
+
+        self.feature_significance = feature_significance
+        self.projected = projected
+        feature_significance = lda_object.coef_
+        covariance_matix = lda_object.covariance_
+
+        return feature_significance, covariance_matix, vars
