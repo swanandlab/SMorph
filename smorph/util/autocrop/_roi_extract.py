@@ -59,7 +59,6 @@ def _draw_ROI(denoised, name):
                 except:
                     pass
 
-
     fig = plt.figure()
     ax = fig.add_subplot()
     ax.imshow(np.max(denoised, 0), cmap='gray')

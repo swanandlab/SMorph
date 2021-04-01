@@ -1,15 +1,7 @@
-import json
-import uuid
-from os import getcwd, mkdir, path
-from shutil import rmtree
 import matplotlib.pyplot as plt
 import numpy as np
-import skimage.io as io
-import tifffile
-import czifile
 from psutil import virtual_memory
 from scipy.spatial import ConvexHull
-from skimage import img_as_float, img_as_ubyte
 from skimage.draw import polygon2mask
 from skimage.filters import apply_hysteresis_threshold, sobel
 from skimage.measure import label, regionprops
@@ -85,41 +77,6 @@ def projectXYZ(img, voxel_sz_x, voxel_sz_y, voxel_sz_z, cmap='gray'):
     axes[1].imshow(np.max(img, axis=1), cmap, aspect=aspect_xz)
     axes[2].imshow(np.max(img, axis=2), cmap, aspect=aspect_yz)
     plt.show()
-
-
-def import_confocal_image(img_path, channel_interest=0):
-    """Loads the 3D confocal image.
-
-    - Tested on: CZI, LSM, TIFF
-
-    Parameters
-    ----------
-    img_path : str
-        Path to the confocal tissue image.
-    channel_interest : int
-        Channel of interest containing image data to be processed,
-        by default 0
-
-    """
-    # image has to be converted to float for processing
-    if img_path.split('.')[-1] == 'czi':
-        img = czifile.imread(img_path)
-        img = img.data
-        img = img_as_float(np.squeeze(img))
-        if img.ndim > 3:
-            img = img[channel_interest]
-    elif img_path.split('.')[-1] == 'lsm':
-        img = tifffile.imread(img_path)
-        img = img_as_float(np.squeeze(img))
-        if img.ndim > 3:
-            img = img[:, channel_interest]
-    else:
-        img = np.squeeze(io.imread(img_path))
-        img = img_as_float(img)
-        if img.ndim > 3:
-            img = img[channel_interest]
-
-    return img
 
 
 def calibrate_nlm_denoiser(img):
@@ -273,6 +230,7 @@ def _unwrap_polygon(polygon):
         X, Y = polygon[0], polygon[1]
     return X, Y
 
+
 def filter_labels(labels, thresholded, polygon, prune_3D_borders=True):
     filtered_labels = clear_border(labels)
 
@@ -359,96 +317,3 @@ def project_batch(BATCH_NO, N_BATCHES, regions, tissue_img):
         extracted_cell[~regions[obj].filled_image] = 0.0
 
         plt.imshow(np.max(extracted_cell, 0), cmap='gray')
-
-
-def export_cells(
-    img_path,
-    low_vol_cutoff,
-    hi_vol_cutoff,
-    output_option,
-    tissue_img,
-    regions,
-    roi_name,
-    roi_polygon,
-    seg_type='segmented'
-):
-    OUT_TYPE = ('3D', 'MIP')[output_option]
-    SEG_TYPES = ('segmented', 'unsegmented', 'both')
-
-    DIR = getcwd() + '/Autocropped/'
-    if not (path.exists(DIR) and path.isdir(DIR)):
-        mkdir(DIR)
-
-    IMAGE_NAME = '.'.join(path.basename(img_path).split('.')[:-1])
-    OUT_DIR = DIR + IMAGE_NAME + \
-              f'{"" if roi_name == "" else "-" + str(roi_name)}_{OUT_TYPE}/'
-    if path.exists(OUT_DIR) and path.isdir(OUT_DIR):
-        rmtree(OUT_DIR)
-    mkdir(OUT_DIR)
-
-    if seg_type == SEG_TYPES[0] or seg_type == SEG_TYPES[2]:
-        mkdir(OUT_DIR + SEG_TYPES[0])
-
-    if seg_type == SEG_TYPES[1] or seg_type == SEG_TYPES[2]:
-        mkdir(OUT_DIR + SEG_TYPES[1])
-
-    cell_metadata = {}
-
-    if img_path.split('.')[-1] == 'tif':
-        with tifffile.TiffFile(img_path) as file:
-            metadata = file.imagej_metadata
-            cell_metadata['unit'] = metadata['unit']
-            cell_metadata['spacing'] = metadata['spacing']
-    elif img_path.split('.')[-1] == 'czi':
-        with czifile.CziFile(img_path) as file:
-            metadata = file.metadata(False)['ImageDocument']['Metadata']
-            cell_metadata['scaling'] = metadata['Scaling']
-
-    if roi_polygon is not None:
-        X, Y = _unwrap_polygon(roi_polygon)
-        roi = (int(min(Y)), int(min(X)), int(max(Y) + 1), int(max(X) + 1))
-        cell_metadata['roi_name'] = roi_name
-        cell_metadata['roi'] = roi
-
-    for (obj, region) in enumerate(regions):
-        if low_vol_cutoff < region.area < hi_vol_cutoff:
-            minz, miny, minx, maxz, maxy, maxx = region.bbox
-            name = (str(uuid.uuid4()) + '.tif')
-
-            # Cell-specific metadata
-            cell_metadata['parent_image'] = path.abspath(img_path)
-            cell_metadata['bounds'] = region.bbox
-            cell_metadata['cell_volume'] = int(region.filled_area)
-            cell_metadata['centroid'] = region.centroid
-            cell_metadata['territorial_volume'] = int(region.convex_area)
-            out_metadata = json.dumps(cell_metadata)
-
-            if seg_type == SEG_TYPES[0] or seg_type == SEG_TYPES[2]:
-                segmented = tissue_img[minz:maxz, miny:maxy, minx:maxx].copy()
-                segmented = img_as_ubyte(segmented)
-                segmented[~region.filled_image] = 0
-
-                out = segmented if OUT_TYPE == '3D' else np.pad(
-                    np.max(segmented, 0),
-                    pad_width=max(segmented.shape[1:]) // 5, mode='constant')
-                out_name = f'{OUT_DIR}{SEG_TYPES[0]}/' + name
-                tifffile.imsave(out_name, out, description=out_metadata,
-                                software='Autocrop')
-
-            if seg_type == SEG_TYPES[1] or seg_type == SEG_TYPES[2]:
-                scale_z = (maxz - minz) // 5
-                scale_y = (maxy - miny) // 5
-                scale_x = (maxx - minx) // 5
-                minz = max(0, minz - scale_z)
-                miny = max(0, miny - scale_y)
-                minx = max(0, minx - scale_x)
-                maxz += scale_z
-                maxy += scale_y
-                maxx += scale_x
-
-                segmented = tissue_img[minz:maxz, miny:maxy, minx:maxx].copy()
-                segmented = img_as_ubyte(segmented)
-                out = segmented if OUT_TYPE == '3D' else np.max(segmented, 0)
-                out_name = f'{OUT_DIR}{SEG_TYPES[1]}/' + name
-                tifffile.imsave(out_name, out, description=out_metadata,
-                                software='Autocrop')
