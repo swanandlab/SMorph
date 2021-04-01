@@ -144,7 +144,7 @@ def export_cells(
     for (obj, region) in enumerate(regions):
         if low_vol_cutoff <= region.area <= hi_vol_cutoff:
             minz, miny, minx, maxz, maxy, maxx = region.bbox
-            name = (str(uuid.uuid4()) + '.tif')
+            name = str(uuid.uuid4().hex) + '.tif'
 
             # Cell-specific metadata
             cell_metadata['parent_image'] = path.abspath(img_path)
@@ -200,9 +200,7 @@ def export_cells(
                     tifffile.imsave(out_name, out, description=out_metadata,
                                     software='Autocrop')
 
-                    out = np.pad(np.max(segmented, 0),
-                                 pad_width=max(segmented.shape[1:]) // 5,
-                                 mode='constant')
+                    out = np.max(segmented, 0)
                     out_name = f'{OUT_DIR}{SEG_TYPES[1]}_{OUT_TYPES[1]}/'+name
                     tifffile.imsave(out_name, out, description=out_metadata,
                                     software='Autocrop')
