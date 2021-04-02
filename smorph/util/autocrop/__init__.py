@@ -21,3 +21,7 @@ from ._io import (
     import_confocal_image,
     export_cells
 )
+
+from ._postprocessing import (
+    postprocess_segment
+)

@@ -5,11 +5,13 @@ from shutil import rmtree
 
 import czifile
 import numpy as np
+import roifile
 import skimage.io as io
 import tifffile
 from skimage import img_as_float, img_as_ubyte
 
 from .core import _unwrap_polygon
+from ...analysis._skeletal import _get_blobs
 
 
 def import_confocal_image(img_path, channel_interest=0):
@@ -45,6 +47,12 @@ def import_confocal_image(img_path, channel_interest=0):
 
     img = img_as_float(img)
     return img
+
+
+def _mkdir_if_not(name):
+    """Collision-free mkdir"""
+    if not (path.exists(name) and path.isdir(name)):
+        mkdir(name)
 
 
 def export_cells(
@@ -97,31 +105,31 @@ def export_cells(
                          '`unsegmented`, `both`')
 
     DIR = getcwd() + '/Autocropped/'
-    if not (path.exists(DIR) and path.isdir(DIR)):
-        mkdir(DIR)
+    _mkdir_if_not(DIR)
 
     IMAGE_NAME = '.'.join(path.basename(img_path).split('.')[:-1])
     OUT_DIR = DIR + IMAGE_NAME + \
               f'{"" if roi_name == "" else "-" + str(roi_name)}/'
-    if path.exists(OUT_DIR) and path.isdir(OUT_DIR):
-        rmtree(OUT_DIR)
-    mkdir(OUT_DIR)
+    # if path.exists(OUT_DIR) and path.isdir(OUT_DIR):  # mandatory new dir
+    #     rmtree(OUT_DIR)
+    # mkdir(OUT_DIR)
+    _mkdir_if_not(OUT_DIR)
 
     if out_type == OUT_TYPES[2]:
         if seg_type == SEG_TYPES[2]:
-            mkdir(OUT_DIR + SEG_TYPES[0] + '_' + OUT_TYPES[0])
-            mkdir(OUT_DIR + SEG_TYPES[0] + '_' + OUT_TYPES[1])
-            mkdir(OUT_DIR + SEG_TYPES[1] + '_' + OUT_TYPES[0])
-            mkdir(OUT_DIR + SEG_TYPES[1] + '_' + OUT_TYPES[1])
+            _mkdir_if_not(OUT_DIR + SEG_TYPES[0] + '_' + OUT_TYPES[0])
+            _mkdir_if_not(OUT_DIR + SEG_TYPES[0] + '_' + OUT_TYPES[1])
+            _mkdir_if_not(OUT_DIR + SEG_TYPES[1] + '_' + OUT_TYPES[0])
+            _mkdir_if_not(OUT_DIR + SEG_TYPES[1] + '_' + OUT_TYPES[1])
         else:
-            mkdir(OUT_DIR + seg_type + '_' + OUT_TYPES[0])
-            mkdir(OUT_DIR + seg_type + '_' + OUT_TYPES[1])
+            _mkdir_if_not(OUT_DIR + seg_type + '_' + OUT_TYPES[0])
+            _mkdir_if_not(OUT_DIR + seg_type + '_' + OUT_TYPES[1])
     else:
         if seg_type == SEG_TYPES[2]:
-            mkdir(OUT_DIR + SEG_TYPES[0] + '_' + out_type)
-            mkdir(OUT_DIR + SEG_TYPES[1] + '_' + out_type)
+            _mkdir_if_not(OUT_DIR + SEG_TYPES[0] + '_' + out_type)
+            _mkdir_if_not(OUT_DIR + SEG_TYPES[1] + '_' + out_type)
         else:
-            mkdir(OUT_DIR + seg_type + '_' + out_type)
+            _mkdir_if_not(OUT_DIR + seg_type + '_' + out_type)
 
     cell_metadata = {}
 
@@ -134,6 +142,7 @@ def export_cells(
         with czifile.CziFile(img_path) as file:
             metadata = file.metadata(False)['ImageDocument']['Metadata']
             cell_metadata['scaling'] = metadata['Scaling']
+    cell_metadata['parent_image'] = path.abspath(img_path)
 
     if roi_polygon is not None:
         X, Y = _unwrap_polygon(roi_polygon)
@@ -142,12 +151,52 @@ def export_cells(
         cell_metadata['roi'] = roi
 
     for (obj, region) in enumerate(regions):
+        if region.area > hi_vol_cutoff:  # for postprocessing
+            minz, miny, minx, maxz, maxy, maxx = region.bbox
+            segmented = tissue_img[minz:maxz, miny:maxy, minx:maxx].copy()
+            segmented = img_as_ubyte(segmented)
+            segmented[~region.filled_image] = 0
+
+            markers = _get_blobs(segmented, 'confocal').astype(int)[:, :-1]
+            xy, z = markers[:, [2, 1]], markers[:, 0] + 1
+            left, top = xy.min(axis=0)
+            right, bottom = xy.max(axis=0)
+
+            roi = roifile.ImagejRoi()
+            roi.version = 227
+            roi.roitype = roifile.ROI_TYPE(10)
+            roi.options = roifile.ROI_OPTIONS(1024)
+            roi.n_coordinates = xy.shape[0]
+            roi.name = 'somas'
+            roi.left, roi.top = int(left), int(top)
+            roi.right, roi.bottom = int(right), int(bottom)
+            roi.integer_coordinates = xy - [roi.left, roi.top]
+            roi.counters = np.array([0] * roi.n_coordinates)
+            roi.counter_positions = markers[:, 0]
+            roi.arrow_style_or_aspect_ratio = 0
+            roi.stroke_width = 3
+            roi.stroke_color = b'\xFF\xFF\x00\x00'  # RED
+
+            name = str(uuid.uuid4().hex)
+            out_name = f'{OUT_DIR}/'+name
+
+            cell_metadata['bounds'] = region.bbox
+            out_metadata = json.dumps(cell_metadata)
+
+            tifffile.imsave(
+                out_name + '.tif',
+                segmented,
+                # imagej=True,
+                # metadata={'axes': 'ZYX', 'Overlays': roi.tobytes()},
+                description=out_metadata,
+                software='Autocrop'
+            )
+            roi.tofile(out_name + '.roi')
         if low_vol_cutoff <= region.area <= hi_vol_cutoff:
             minz, miny, minx, maxz, maxy, maxx = region.bbox
             name = str(uuid.uuid4().hex) + '.tif'
 
             # Cell-specific metadata
-            cell_metadata['parent_image'] = path.abspath(img_path)
             cell_metadata['bounds'] = region.bbox
             cell_metadata['cell_volume'] = int(region.filled_area)
             cell_metadata['centroid'] = region.centroid

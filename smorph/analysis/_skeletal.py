@@ -39,8 +39,11 @@ def _get_blobs(cell_image, image_type):
 
     def eliminate_border_blobs(blobs_log):
         """Find the blobs too close to border so as to eliminate them."""
-        border_x = image.shape[1] / 5
-        border_y = image.shape[0] / 5
+        if image.ndim == 3:
+            return blobs_log
+
+        border_x = image.shape[-1] / 5
+        border_y = image.shape[-2] / 5
 
         filtered_blobs = blobs_log[(border_x < blobs_log[:, 1]) &
                                    (blobs_log[:, 1] < 4*border_x) &
