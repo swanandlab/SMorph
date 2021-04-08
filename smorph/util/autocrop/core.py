@@ -231,14 +231,10 @@ def _unwrap_polygon(polygon):
     return X, Y
 
 
-def filter_labels(labels, thresholded, polygon, prune_3D_borders=True):
-    filtered_labels = clear_border(labels)
-
-    if prune_3D_borders:
-        # Find convex hull that approximates tissue structure
-        convex_hull = _compute_convex_hull(thresholded)
-        filtered_labels = clear_border(filtered_labels,
-                                       mask=binary_erosion(convex_hull))
+def filter_labels(labels, thresholded, polygon=None, conservative=True):
+    mask = binary_erosion(np.ones(labels.shape, dtype=bool) if conservative
+                          else _compute_convex_hull(thresholded))
+    filtered_labels = clear_border(labels, mask=mask)
 
     if polygon is not None:
         X, Y = _unwrap_polygon(polygon)
@@ -251,17 +247,16 @@ def filter_labels(labels, thresholded, polygon, prune_3D_borders=True):
 
         for i in range(1, shape[0]):
             roi_mask[i] = roi_mask[0]
-        filtered_labels = clear_border(filtered_labels,
-                                       mask=binary_erosion(roi_mask))
+        roi_mask = binary_erosion(roi_mask)
+        filtered_labels = clear_border(filtered_labels, mask=roi_mask)
 
     return filtered_labels
 
 
-def _filter_small_objects(regions):
-    CUTOFF_VOLUME_3D = 27
+def _filter_small_objects(regions, cutoff_volume=27):
     idx = 0
     for region in regions:
-        if region.area > CUTOFF_VOLUME_3D:
+        if region.area > cutoff_volume:
             break
         idx += 1
     filtered = regions[idx:]

@@ -5,7 +5,7 @@ import napari
 import numpy as np
 import roifile
 import tifffile
-from skimage.measure import regionprops
+from skimage.measure import regionprops, label
 from skimage.segmentation import watershed
 
 from ._io import export_cells
@@ -17,7 +17,11 @@ def _segment_clump(image, markers):
     return labels
 
 
-def postprocess_segment(folder):
+def postprocess_segment(SOMA_SELECTED_DIR, reconstructed_labels):
+    folder = SOMA_SELECTED_DIR
+    parent_path = None
+    roi_path = None
+
     for file in listdir(folder):
         if not file.startswith('.') and file.endswith(('.tif', '.tiff')):
             name = folder + '/' + file
@@ -28,7 +32,7 @@ def postprocess_segment(folder):
             try:
                 # look for ROI in same directory
                 roi = roifile.roiread(folder + '/' + \
-                                      '.'.join(file.split('.')[:-1]) + '.roi')
+                                        '.'.join(file.split('.')[:-1]) + '.roi')
                 yx = roi.coordinates()[:, [1, 0]]
                 z = roi.counter_positions - 1
                 somas_coords = np.insert(yx, 0, z, axis=1)
@@ -39,10 +43,12 @@ def postprocess_segment(folder):
                     markers[tuple(somas_coords[i-1])] = i
 
                 labels = _segment_clump(im, markers)
-                regions = regionprops(labels)
-                parent = path.basename(metadata['parent_image'])
-                print(parent)
-                export_cells(parent, 0, np.prod(im.shape), 'both',
-                             im, regions, 'segmented')
+                parent_path = metadata['parent_image']
+                roi_path = metadata['roi_path']
+
+                minz, miny, minx, maxz, maxy, maxx = metadata['bounds']
+                reconstructed_labels[minz:maxz, miny:maxy, minx:maxx] += labels
             except:
                 continue
+    reconstructed_labels = label(reconstructed_labels)
+    return reconstructed_labels, parent_path, roi_path

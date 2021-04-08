@@ -55,6 +55,28 @@ def _mkdir_if_not(name):
         mkdir(name)
 
 
+def _build_multipoint_roi(markers):
+    xy, z = markers[:, [2, 1]], markers[:, 0] + 1
+    left, top = xy.min(axis=0)
+    right, bottom = xy.max(axis=0)
+
+    roi = roifile.ImagejRoi()
+    roi.version = 227
+    roi.roitype = roifile.ROI_TYPE(10)
+    roi.options = roifile.ROI_OPTIONS(1024)
+    roi.n_coordinates = xy.shape[0]
+    roi.name = 'somas'
+    roi.left, roi.top = int(left), int(top)
+    roi.right, roi.bottom = int(right), int(bottom)
+    roi.integer_coordinates = xy - [roi.left, roi.top]
+    roi.counters = np.array([0] * roi.n_coordinates)
+    roi.counter_positions = markers[:, 0]
+    roi.arrow_style_or_aspect_ratio = 0
+    roi.stroke_width = 4
+    roi.stroke_color = b'\xFF\xFF\x00\x00'  # RED
+    return roi
+
+
 def export_cells(
     img_path,
     low_vol_cutoff,
@@ -62,9 +84,11 @@ def export_cells(
     out_type,
     tissue_img,
     regions,
+    residue_regions=None,
     seg_type='segmented',
     roi_name='',
-    roi_polygon=None
+    roi_polygon=None,
+    roi_path=''
 ):
     """Exports cropped cells.
 
@@ -149,6 +173,7 @@ def export_cells(
         roi = (int(min(Y)), int(min(X)), int(max(Y) + 1), int(max(X) + 1))
         cell_metadata['roi_name'] = roi_name
         cell_metadata['roi'] = roi
+        cell_metadata['roi_path'] = roi_path
 
     for (obj, region) in enumerate(regions):
         if region.area > hi_vol_cutoff:  # for postprocessing
@@ -157,25 +182,11 @@ def export_cells(
             segmented = img_as_ubyte(segmented)
             segmented[~region.filled_image] = 0
 
-            markers = _get_blobs(segmented, 'confocal').astype(int)[:, :-1]
-            xy, z = markers[:, [2, 1]], markers[:, 0] + 1
-            left, top = xy.min(axis=0)
-            right, bottom = xy.max(axis=0)
-
-            roi = roifile.ImagejRoi()
-            roi.version = 227
-            roi.roitype = roifile.ROI_TYPE(10)
-            roi.options = roifile.ROI_OPTIONS(1024)
-            roi.n_coordinates = xy.shape[0]
-            roi.name = 'somas'
-            roi.left, roi.top = int(left), int(top)
-            roi.right, roi.bottom = int(right), int(bottom)
-            roi.integer_coordinates = xy - [roi.left, roi.top]
-            roi.counters = np.array([0] * roi.n_coordinates)
-            roi.counter_positions = markers[:, 0]
-            roi.arrow_style_or_aspect_ratio = 0
-            roi.stroke_width = 3
-            roi.stroke_color = b'\xFF\xFF\x00\x00'  # RED
+            try:
+                markers = _get_blobs(segmented, 'confocal').astype(int)[:, :-1]
+            except:
+                markers = np.array([np.array(segmented.shape)]) // 2
+            roi = _build_multipoint_roi(markers)
 
             name = str(uuid.uuid4().hex)
             out_name = f'{OUT_DIR}/'+name
@@ -186,8 +197,12 @@ def export_cells(
             tifffile.imsave(
                 out_name + '.tif',
                 segmented,
-                # imagej=True,
-                # metadata={'axes': 'ZYX', 'Overlays': roi.tobytes()},
+                description=out_metadata,
+                software='Autocrop'
+            )
+            tifffile.imsave(
+                out_name + '_mip.tif',
+                np.max(segmented, 0),
                 description=out_metadata,
                 software='Autocrop'
             )
@@ -259,3 +274,40 @@ def export_cells(
                     out_name = f'{OUT_DIR}{SEG_TYPES[1]}_{out_type}/'+name
                     tifffile.imsave(out_name, out, description=out_metadata,
                                     software='Autocrop')
+
+    if residue_regions is not None:
+        RES_DIR = OUT_DIR + 'residue'
+        _mkdir_if_not(RES_DIR)
+        for (obj, region) in enumerate(residue_regions):
+            # for postprocessing
+            minz, miny, minx, maxz, maxy, maxx = region.bbox
+            segmented = tissue_img[minz:maxz, miny:maxy, minx:maxx].copy()
+            segmented = img_as_ubyte(segmented)
+            segmented[~region.filled_image] = 0
+
+            try:
+                markers = _get_blobs(segmented, 'confocal').astype(int)[:, :-1]
+            except:
+                markers = np.array([np.array(segmented.shape)]) // 2
+                markers = markers[:, [0, 2, 1]]
+            roi = _build_multipoint_roi(markers)
+
+            name = str(uuid.uuid4().hex)
+            out_name = f'{RES_DIR}/'+name
+
+            cell_metadata['bounds'] = region.bbox
+            out_metadata = json.dumps(cell_metadata)
+
+            tifffile.imsave(
+                out_name + '.tif',
+                segmented,
+                description=out_metadata,
+                software='Autocrop'
+            )
+            tifffile.imsave(
+                out_name + '_mip.tif',
+                np.max(segmented, 0),
+                description=out_metadata,
+                software='Autocrop'
+            )
+            roi.tofile(out_name + '.roi')
