@@ -16,7 +16,13 @@ from sklearn import decomposition, metrics, preprocessing
 from sklearn.cluster import KMeans
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
 
-from ..util._io import df_to_csv, read_groups_folders, silent_remove_file
+from ..util._io import (
+    df_to_csv,
+    read_groups_folders,
+    silent_remove_file,
+    mkdir_if_not,
+    savefig
+)
 from .api import Cell
 
 _ALL_FEATURE_NAMES = (
@@ -53,7 +59,7 @@ def _analyze_cells(
     threshold_method,
     shell_step_sz,
     poly_degree,
-    save_features,
+    save_results,
     show_logs
 ):
     """Performs complete reading & feature extraction for groups of cells.
@@ -85,7 +91,7 @@ def _analyze_cells(
     poly_degree : int, optional
         Degree of polynomial for fitting regression model on sholl values, by
         default 3
-    save_features : bool
+    save_results : bool
         To save the features into a file.
     show_logs : bool
         To display logs of groups analysis.
@@ -174,7 +180,7 @@ def _analyze_cells(
                   if idx not in bad_cells_idx]
     features = DataFrame(dataset_features, columns=_ALL_FEATURE_NAMES)
 
-    if save_features:
+    if save_results:
         FEATURES_DIR, FEATURES_FILE_NAME = '/Results/', 'features.csv'
         out_features = features.copy()
         out_features.insert(0, 'cell_image_file', file_names)
@@ -222,9 +228,8 @@ class Groups:
     polynomial_degree : int, optional
         Degree of polynomial for fitting regression model on sholl values, by
         default 3
-    save_features : bool, optional
-        To save a file containing morphometric features of each cell,
-        by default True
+    save_results : bool, optional
+        To save analysis results, by default True
     show_logs : bool, optional
         To show logs of analysis of each cell, by default False
 
@@ -262,7 +267,7 @@ class Groups:
     __slots__ = ('features', 'targets', 'sholl_original_plots', 'labels',
                  'sholl_polynomial_plots', 'pca_feature_names', 'markers',
                  'feature_significance', 'file_names', 'group_counts',
-                 'projected', 'shell_step_size')
+                 'projected', 'shell_step_size', 'save')
 
     def __init__(
         self,
@@ -274,11 +279,12 @@ class Groups:
         threshold_method='otsu',
         shell_step_size=3,
         polynomial_degree=3,
-        save_features=True,
+        save_results=True,
         show_logs=False
     ):
         self.labels = labels
         self.shell_step_size = shell_step_size
+        self.save = save_results
 
         (
             self.features,
@@ -289,13 +295,17 @@ class Groups:
             self.file_names
         ) = _analyze_cells(groups_folders, image_type, groups_crop_tech,
                            contrast_ptiles, threshold_method, shell_step_size,
-                           polynomial_degree, save_features, show_logs)
+                           polynomial_degree, save_results, show_logs)
 
         self.pca_feature_names = None
         self.markers = None
         self.feature_significance = None
 
-    def plot_avg_sholl_plot(self, save_results=True, mark_avg_branch_lengths=False):
+    def plot_avg_sholl_plot(
+        self,
+        save_results=True,
+        mark_avg_branch_lengths=False
+    ):
         """Plots average Sholl Plot
 
         Parameters
@@ -354,9 +364,10 @@ class Groups:
         plt.xlabel("Distance from soma")
         plt.ylabel("No. of intersections")
         plt.legend()
+        fig = plt.gcf()
         plt.show()
 
-        if save_results:
+        if save_results or self.save:
             # single_cell_intersections
             DIR, OUTFILE = '/Results/', 'sholl_intersections.csv'
             cols = list(range(shell_step_sz,
@@ -367,6 +378,9 @@ class Groups:
             df_polynomial_plots = DataFrame(polynomial_plots, columns=cols)
             write_buffer[df_polynomial_plots.columns] = df_polynomial_plots
             df_to_csv(write_buffer, DIR, OUTFILE)
+
+            OUTPLOT = 'avg_sholl_plot.png'
+            savefig(fig, DIR + OUTPLOT)
 
     def plot_feature_scatter_matrix(self, on_features):
         """Plot feature scatter matrix.
@@ -394,6 +408,9 @@ class Groups:
             ax.xaxis.label.set_ha('right')
             ax.yaxis.label.set_rotation(45)
             ax.yaxis.label.set_ha('right')
+
+        if self.save:
+            savefig(plt, '/Results/feature_scatter_matrix.png')
 
         plt.show()
 
@@ -502,11 +519,6 @@ class Groups:
         PC_1 = projected[:, 0]
         PC_2 = projected[:, 1]
 
-        if save_results:
-            PC_COLUMN_NAMES = [f'PC {itr + 1}' for itr in range(n_PC)]
-            pca_values = DataFrame(data=projected, columns=PC_COLUMN_NAMES)
-            df_to_csv(pca_values, '/Results/', 'pca_values.csv')
-
         fig, axes = plt.subplots(ncols=2, nrows=1, figsize=(8, 4))
 
         axes[0].plot(pca_object.explained_variance_ratio_, '-o')
@@ -519,7 +531,10 @@ class Groups:
         axes[1].title.set_text('Cumulative Scree Plot')
         plt.ylim(0, 1)
         fig.tight_layout()
+        scree_plots = plt.gcf()
         plt.show()
+
+        two_PCs_plot = None
 
         def visualize_two_PCs():
             n_std = 3  # no. of standard deviations to show
@@ -540,9 +555,20 @@ class Groups:
             plt.xlabel(f'PC 1 (Variance: {var_PCs[0]*100:.1f})', fontsize=14)
             plt.ylabel(f'PC 2 (Variance: {var_PCs[1]*100:.1f})', fontsize=14)
             plt.legend(title='Groups')
+            nonlocal two_PCs_plot
+            two_PCs_plot = plt.gcf()
             plt.show()
 
         visualize_two_PCs()
+
+        if save_results or self.save:
+            DIR = '/Results/'
+            PC_COLUMN_NAMES = [f'PC {itr + 1}' for itr in range(n_PC)]
+            pca_values = DataFrame(data=projected, columns=PC_COLUMN_NAMES)
+            df_to_csv(pca_values, DIR, 'pca_values.csv')
+
+            savefig(scree_plots, DIR + 'scree_plots.png')
+            savefig(two_PCs_plot, DIR + 'two_PCs_plot.png')
 
         self.feature_significance = feature_significance
         self.projected = projected
@@ -585,6 +611,10 @@ class Groups:
 
         ax[0].legend(self.labels, loc='best', fontsize=8)
         plt.tight_layout()
+
+        if self.save:
+            savefig(plt, '/Results/feature_histograms.png')
+
         plt.show()
 
     def plot_feature_significance_heatmap(self):
@@ -624,6 +654,11 @@ class Groups:
         plt.colorbar(orientation='horizontal')
         plt.xticks(range(len(sorted_feature_names)),
                    sorted_feature_names, rotation=65, ha='left')
+        plt.tight_layout()
+
+        if self.save:
+            savefig(plt, '/Results/feature_significance_heatmap.png')
+
         plt.show()
 
     def plot_feature_significance_vectors(self):
@@ -658,6 +693,10 @@ class Groups:
                     color='g', ha='center', va='center')
         ax.set_xlabel('PC 1')
         ax.set_ylabel('PC 2')
+
+        if self.save:
+            savefig(plt, '/Results/feature_significance_vectors.png')
+
         plt.show()
 
     def get_clusters(
@@ -781,12 +820,15 @@ class Groups:
         centers_df['cluster_label'] = range(k)
 
         LABEL_COLOR_MAP = color_palette(None, k)
+        cluster_plot = None
 
         def parallel_plot(data):
             plt.figure(figsize=(15, 8)).gca().axes.set_ylim([-3, 3])
             parallel_coordinates(data, 'cluster_label',
                                  color=LABEL_COLOR_MAP, marker='o')
             plt.xticks(rotation=90)
+            nonlocal cluster_plot
+            cluster_plot = plt.gcf()
 
         def scatter_plot(data, centers):
             l_idx = r_idx = 0
@@ -795,8 +837,8 @@ class Groups:
             if data.shape[1] == 2:
                 for i in range(k):
                     plt.text(centers[i, 0], centers[i, 1], i, weight='bold',
-                                size=10, backgroundcolor=LABEL_COLOR_MAP[i],
-                                color='white')
+                             size=10, backgroundcolor=LABEL_COLOR_MAP[i],
+                             color='white')
 
                 for cells in group_cnts:
                     r_idx += cells
@@ -807,6 +849,8 @@ class Groups:
 
                 plt.xlabel('PC1'), plt.ylabel('PC2')
                 plt.legend(title='Groups')
+                nonlocal cluster_plot
+                cluster_plot = plt.gcf()
                 plt.show()
             elif data.shape[1] == 3:  # ipyvolume 3D scatter plot
                 # assuming 2 classes: stab & ctrl
@@ -855,8 +899,12 @@ class Groups:
         out = DataFrame(self.file_names, columns=['file_name'])
         out[df.columns] = df
 
-        if save_results:
-            df_to_csv(out, '/Results/', 'clustered_cells.csv')
+        if save_results or self.save:
+            DIR = '/Results/'
+            df_to_csv(out, DIR, 'clustered_cells.csv')
+            df_to_csv(dist, DIR, 'cluster_distribution.csv')
+            if cluster_plot is not None:
+                savefig(cluster_plot, DIR + 'cluster_plot.png')
 
         if label_metadata:
             for _, row in out.iterrows():
@@ -883,7 +931,8 @@ class Groups:
             for cluster_dir in CLUSTER_DIRS:
                 mkdir(DIR + cluster_dir)
 
-            for _, row in out.iterrows():
+            group_pos = group_pos[1:] - 1
+            for index, row in out.iterrows():
                 file_path = row['file_name']
                 if file_path.split('.')[-1] == 'tif':
                     with tifffile.TiffFile(file_path) as file:
@@ -895,8 +944,11 @@ class Groups:
                         except json.decoder.JSONDecodeError:
                             cell_metadata = {}
                         out_metadata = json.dumps(cell_metadata)
-                        tifffile.imsave(DIR + str(row['cluster_label']) \
-                                            + '/' + name,
+                        label_index = np.searchsorted(group_pos, index)
+                        OUT_DIR = f'{DIR}{row["cluster_label"]}/' \
+                                  f'{self.labels[label_index]}'
+                        mkdir_if_not(OUT_DIR)
+                        tifffile.imsave(f'{OUT_DIR}/{name}',
                                         img, description=out_metadata)
 
         return centers_df, df, dist
@@ -947,7 +999,7 @@ class Groups:
             raise ValueError('Selected features are not a subset '
                              'of the original set of morphological features.')
 
-        self.pca_feature_names = on_features
+        # self.pca_feature_names = on_features
         markers = iter(self.markers.values())
 
         subset_features = self.features[on_features].to_numpy()
@@ -970,6 +1022,7 @@ class Groups:
 
         # transform data
         projected = lda_object.transform(X)
+        lda_plot = None
 
         def visualize_two_components():
             C_1 = projected[:, 0]
@@ -998,12 +1051,17 @@ class Groups:
             plt.title('First two Components')
             plt.xlabel(f'C 1 (Variance: {vars[0]*100:.1f})', fontsize=14)
             plt.ylabel(f'C 2 (Variance: {vars[1]*100:.1f})', fontsize=14)
+            nonlocal lda_plot
+            lda_plot = plt.gcf()
             plt.show()
 
         visualize_two_components()
 
-        self.feature_significance = feature_significance
-        self.projected = projected
+        if self.save and lda_plot is not None:
+            savefig(lda_plot, '/Results/lda_plot.png')
+
+        # self.feature_significance = feature_significance
+        # self.projected = projected
         feature_significance = lda_object.coef_
         covariance_matix = lda_object.covariance_
 
