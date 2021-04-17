@@ -220,8 +220,9 @@ def export_cells(
 
             if seg_type == SEG_TYPES[0] or seg_type == SEG_TYPES[2]:
                 segmented = tissue_img[minz:maxz, miny:maxy, minx:maxx].copy()
-                segmented = img_as_ubyte(segmented)
                 segmented[~region.filled_image] = 0
+                segmented = segmented / segmented.max()  # contrast stretch
+                segmented = img_as_ubyte(segmented)
 
                 if out_type == OUT_TYPES[2]:
                     out = segmented
@@ -256,6 +257,10 @@ def export_cells(
                 maxx += scale_x
 
                 segmented = tissue_img[minz:maxz, miny:maxy, minx:maxx].copy()
+                # contrast stretch
+                minv, maxv = segmented.min(), segmented.max()
+                segmented = (segmented - minv) / (maxv - minv)
+
                 segmented = img_as_ubyte(segmented)
 
                 if out_type == OUT_TYPES[2]:
@@ -279,35 +284,36 @@ def export_cells(
         RES_DIR = OUT_DIR + 'residue'
         _mkdir_if_not(RES_DIR)
         for (obj, region) in enumerate(residue_regions):
-            # for postprocessing
-            minz, miny, minx, maxz, maxy, maxx = region.bbox
-            segmented = tissue_img[minz:maxz, miny:maxy, minx:maxx].copy()
-            segmented = img_as_ubyte(segmented)
-            segmented[~region.filled_image] = 0
+            if low_vol_cutoff <= region.area:  # for postprocessing
+                minz, miny, minx, maxz, maxy, maxx = region.bbox
+                segmented = tissue_img[minz:maxz, miny:maxy, minx:maxx].copy()
+                segmented[~region.filled_image] = 0
+                segmented = segmented / segmented.max()  # contrast stretch
+                segmented = img_as_ubyte(segmented)
 
-            try:
-                markers = _get_blobs(segmented, 'confocal').astype(int)[:, :-1]
-            except:
-                markers = np.array([np.array(segmented.shape)]) // 2
-                markers = markers[:, [0, 2, 1]]
-            roi = _build_multipoint_roi(markers)
+                try:
+                    markers = _get_blobs(segmented, 'confocal').astype(int)[:, :-1]
+                except:
+                    markers = np.array([np.array(segmented.shape)]) // 2
+                    markers = markers[:, [0, 2, 1]]
+                roi = _build_multipoint_roi(markers)
 
-            name = str(uuid.uuid4().hex)
-            out_name = f'{RES_DIR}/'+name
+                name = str(uuid.uuid4().hex)
+                out_name = f'{RES_DIR}/'+name
 
-            cell_metadata['bounds'] = region.bbox
-            out_metadata = json.dumps(cell_metadata)
+                cell_metadata['bounds'] = region.bbox
+                out_metadata = json.dumps(cell_metadata)
 
-            tifffile.imsave(
-                out_name + '.tif',
-                segmented,
-                description=out_metadata,
-                software='Autocrop'
-            )
-            tifffile.imsave(
-                out_name + '_mip.tif',
-                np.max(segmented, 0),
-                description=out_metadata,
-                software='Autocrop'
-            )
-            roi.tofile(out_name + '.roi')
+                tifffile.imsave(
+                    out_name + '.tif',
+                    segmented,
+                    description=out_metadata,
+                    software='Autocrop'
+                )
+                tifffile.imsave(
+                    out_name + '_mip.tif',
+                    np.max(segmented, 0),
+                    description=out_metadata,
+                    software='Autocrop'
+                )
+                roi.tofile(out_name + '.roi')

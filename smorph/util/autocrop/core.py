@@ -232,9 +232,8 @@ def _unwrap_polygon(polygon):
 
 
 def filter_labels(labels, thresholded, polygon=None, conservative=True):
-    mask = binary_erosion(np.ones(labels.shape, dtype=bool) if conservative
-                          else _compute_convex_hull(thresholded))
-    filtered_labels = clear_border(labels, mask=mask)
+    filtered_labels = clear_border(labels, mask=None if conservative
+                                   else _compute_convex_hull(thresholded))
 
     if polygon is not None:
         X, Y = _unwrap_polygon(polygon)

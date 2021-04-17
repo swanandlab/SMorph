@@ -27,6 +27,7 @@ def postprocess_segment(SOMA_SELECTED_DIR, reconstructed_labels):
             name = folder + '/' + file
             image = tifffile.TiffFile(name)
             metadata = image.pages[0].tags['ImageDescription'].value
+            print(file)
             metadata = json.loads(metadata)
 
             try:
@@ -35,7 +36,7 @@ def postprocess_segment(SOMA_SELECTED_DIR, reconstructed_labels):
                                         '.'.join(file.split('.')[:-1]) + '.roi')
                 yx = roi.coordinates()[:, [1, 0]]
                 z = roi.counter_positions - 1
-                somas_coords = np.insert(yx, 0, z, axis=1)
+                somas_coords = np.insert(yx, 0, z, axis=1).astype(int)
                 im = image.asarray()
 
                 markers = np.zeros(im.shape)
@@ -48,7 +49,7 @@ def postprocess_segment(SOMA_SELECTED_DIR, reconstructed_labels):
 
                 minz, miny, minx, maxz, maxy, maxx = metadata['bounds']
                 reconstructed_labels[minz:maxz, miny:maxy, minx:maxx] += labels
-            except:
-                continue
+            except Exception as e:
+                print(e)
     reconstructed_labels = label(reconstructed_labels)
     return reconstructed_labels, parent_path, roi_path
