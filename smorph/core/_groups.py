@@ -129,6 +129,8 @@ def _analyze_cells(
         groups_crop_tech = [groups_crop_tech for i in range(N_GROUPS)]
 
     silent_remove_file(SKIPPED_CELLS_FILENAME)
+    # PROCESSED_DIR = 'Results/processed/'
+    # mkdir(PROCESSED_DIR)
 
     for group_no, group in enumerate(dataset):
         group_cell_cnt = 0
@@ -145,6 +147,16 @@ def _analyze_cells(
                             shell_step_size=shell_step_sz,
                             polynomial_degree=poly_degree)
                 cell_features = list(cell.features.values())
+                # to output intermediate cell processing steps
+                # tifffile.imsave(PROCESSED_DIR + file_names[cell_cnt].split('/')[-1], skimage.img_as_ubyte(cell.image))
+                # bin = cell.cleaned_image
+                # bin[bin == True] = 255
+                # bin[bin == False] = 0
+                # tifffile.imsave(PROCESSED_DIR + file_names[cell_cnt].split('/')[-1].replace('.tif', '_bin.tif'), skimage.img_as_ubyte(bin))
+                # tifffile.imsave(PROCESSED_DIR + file_names[cell_cnt].split('/')[-1].replace('.tif', '_sk.tif'), cell.skeleton)
+                # plt.imshow(cell.image, cmap='gray'), plt.imshow(cell.skeleton, alpha = .4)
+                # plt.axis('off')
+                # plt.savefig(PROCESSED_DIR + file_names[cell_cnt].split('/')[-1].replace('.tif', '_sovr.tif'), bbox_inches='tight', pad_inches=0)
 
                 for feature in cell_features:
                     if feature is None:

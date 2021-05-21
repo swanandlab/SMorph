@@ -3,6 +3,7 @@ from os import listdir, path
 
 import napari
 import numpy as np
+import roifile
 import tifffile
 import smorph.util.autocrop as ac
 
@@ -224,6 +225,9 @@ def _identify_cell_in_tissue(img_path):
             blending='additive',
             name='bbox'
         )
+        # to view roi polygon
+        # viewer.add_shapes([roifile.roiread(cell_data['roi_path']).coordinates()[:, [1, 0]]],
+        #                   shape_type='polygon')
         viewer.camera.center = cell_data['centroid']
 
 
@@ -272,6 +276,8 @@ def identify_cells_in_tissue(img_paths):
 
     if type(img_paths) is str:
         return _identify_cell_in_tissue(img_paths)
+    if len(img_paths) == 1:
+        return _identify_cell_in_tissue(img_paths[0])
 
     with napari.gui_qt():
         dataset = _read_images(img_paths)

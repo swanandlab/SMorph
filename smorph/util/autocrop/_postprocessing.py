@@ -8,7 +8,9 @@ import tifffile
 from skimage.measure import regionprops, label
 from skimage.segmentation import watershed
 
-from ._io import export_cells
+from ._io import import_confocal_image, export_cells
+from ._roi_extract import _load_ROI
+from .core import _unwrap_polygon
 
 
 def _segment_clump(image, markers):
@@ -17,7 +19,7 @@ def _segment_clump(image, markers):
     return labels
 
 
-def postprocess_segment(SOMA_SELECTED_DIR, reconstructed_labels):
+def postprocess_segment(SOMA_SELECTED_DIR, reconstructed_labels=None):
     folder = SOMA_SELECTED_DIR
     parent_path = None
     roi_path = None
@@ -27,7 +29,7 @@ def postprocess_segment(SOMA_SELECTED_DIR, reconstructed_labels):
             name = folder + '/' + file
             image = tifffile.TiffFile(name)
             metadata = image.pages[0].tags['ImageDescription'].value
-            print(file)
+            # print(file)
             metadata = json.loads(metadata)
 
             try:
@@ -47,7 +49,19 @@ def postprocess_segment(SOMA_SELECTED_DIR, reconstructed_labels):
                 parent_path = metadata['parent_image']
                 roi_path = metadata['roi_path']
 
+                if reconstructed_labels is None:
+                    parent = import_confocal_image(parent_path)
+                    reconstructed_labels = np.zeros(parent.shape)
+
                 minz, miny, minx, maxz, maxy, maxx = metadata['bounds']
+                linebuilder = _load_ROI(roi_path)
+                X, Y = _unwrap_polygon(linebuilder)
+                min_x, max_x = int(min(X)), int(max(X) + 1)
+                min_y, max_y = int(min(Y)), int(max(Y) + 1)
+                miny += min_y
+                maxy += min_y
+                minx += min_x
+                maxx += min_x
                 reconstructed_labels[minz:maxz, miny:maxy, minx:maxx] += labels
             except Exception as e:
                 print(e)

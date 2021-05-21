@@ -173,7 +173,7 @@ def export_cells(
         roi = (int(min(Y)), int(min(X)), int(max(Y) + 1), int(max(X) + 1))
         cell_metadata['roi_name'] = roi_name
         cell_metadata['roi'] = roi
-        cell_metadata['roi_path'] = roi_path
+        cell_metadata['roi_path'] = path.abspath(roi_path)
 
     for (obj, region) in enumerate(regions):
         if region.area > hi_vol_cutoff:  # for postprocessing
@@ -234,7 +234,7 @@ def export_cells(
                                  pad_width=max(segmented.shape[1:]) // 5,
                                  mode='constant')
                     out_name = f'{OUT_DIR}{SEG_TYPES[0]}_{OUT_TYPES[1]}/'+name
-                    tifffile.imsave(out_name, out, description=out_metadata,
+                    tifffile.imsave(out_name.replace('.tif', '_mip.tif'), out, description=out_metadata,
                                     software='Autocrop')
                 else:
                     out = segmented if out_type == OUT_TYPES[0] else np.pad(
@@ -242,7 +242,7 @@ def export_cells(
                         pad_width=max(segmented.shape[1:]) // 5,
                         mode='constant')
                     out_name = f'{OUT_DIR}{SEG_TYPES[0]}_{out_type}/'+name
-                    tifffile.imsave(out_name, out, description=out_metadata,
+                    tifffile.imsave(out_name.replace('.tif', '_mip.tif'), out, description=out_metadata,
                                     software='Autocrop')
 
             if seg_type == SEG_TYPES[1] or seg_type == SEG_TYPES[2]:
