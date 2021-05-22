@@ -71,5 +71,6 @@ def df_to_csv(df, folder, out_file_name):
 
     df.to_csv(DIR + out_file_name, index=False, mode='w')
 
+
 def savefig(fig, name):
     fig.savefig(getcwd() + name, transparent=False, facecolor='w')

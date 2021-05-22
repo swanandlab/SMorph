@@ -7,6 +7,7 @@ import ipyvolume as ipv
 import matplotlib.pyplot as plt
 import numpy as np
 import tifffile
+from matplotlib.offsetbox import AnnotationBbox, OffsetImage
 from matplotlib.patches import Ellipse
 from pandas import DataFrame
 from pandas.plotting import parallel_coordinates, scatter_matrix
@@ -394,11 +395,11 @@ class Groups:
 
         """
         if on_features is None:
-            on_features = list(_ALL_FEATURE_NAMES)
+            on_features = self.features.columns.to_list()
 
         subset_features = self.features[on_features]
 
-        scaler = preprocessing.MinMaxScaler()
+        scaler = preprocessing.StandardScaler()
         scaler.fit(subset_features)
         X = DataFrame(scaler.transform(subset_features), columns=on_features)
 
@@ -459,7 +460,7 @@ class Groups:
             morphological features.
 
         """
-        all_features = list(_ALL_FEATURE_NAMES)
+        all_features = self.features.columns.to_list()
         targets = self.targets
         labels = self.labels
 
@@ -500,7 +501,7 @@ class Groups:
         pca_object = decomposition.PCA(n_PC, svd_solver='arpack')
 
         # Scale data
-        scaler = preprocessing.MaxAbsScaler()
+        scaler = preprocessing.StandardScaler()
         scaler.fit(subset_features)
         X = scaler.transform(subset_features)
 
@@ -777,10 +778,10 @@ class Groups:
 
         if use_features:
             if n_PC is None:
-                scaler = preprocessing.MaxAbsScaler()
+                scaler = preprocessing.StandardScaler()
                 features = all_features.to_numpy()
                 COLUMN_NAMES = ['normalized_' +
-                                itr for itr in _ALL_FEATURE_NAMES]
+                                itr for itr in all_features.columns]
                 df = DataFrame(scaler.fit(features).transform(features),
                                columns=COLUMN_NAMES)
             else:
@@ -835,18 +836,73 @@ class Groups:
             label_color = [LABEL_COLOR_MAP[l] for l in kmeans_model.labels_]
 
             if data.shape[1] == 2:
-                for i in range(k):
-                    plt.text(centers[i, 0], centers[i, 1], i, weight='bold',
-                             size=10, backgroundcolor=LABEL_COLOR_MAP[i],
-                             color='white')
+                fig, ax = plt.subplots()
+                # for i in range(k):  # cluster ID label
+                #     plt.text(centers[i, 0], centers[i, 1], i, weight='bold',
+                #             size=10, backgroundcolor=LABEL_COLOR_MAP[i],
+                #             color='white')
 
                 for cells in group_cnts:
                     r_idx += cells
-                    plt.scatter(data[l_idx:r_idx, 0], data[l_idx:r_idx, 1], 40,
-                                label_color[l_idx:r_idx], next(markers),
-                                label=next(labels), alpha=.75)
+                    ax.scatter(data[l_idx:r_idx, 0], data[l_idx:r_idx, 1], 40,
+                               label_color[l_idx:r_idx], next(markers),
+                               label=next(labels), alpha=.75, picker=True)
                     l_idx += cells
 
+                # for i in range(data.shape[0]):  # annotate cell order
+                #     ax.annotate(str(i), (data[i,0], data[i, 1]))
+
+                names = self.file_names
+                annot = ax.annotate("", xy=(0, 0), xytext=(20, 20),
+                                    textcoords="offset points",
+                                    bbox=dict(boxstyle="round", fc="w"),
+                                    arrowprops=dict(arrowstyle="->"))
+                ab = AnnotationBbox(None, xy=(0, 0), xybox=(50, -50),
+                                    boxcoords="offset points",
+                                    arrowprops=dict(arrowstyle="->"))
+                ab_artist = None
+                annot.set_visible(False)
+
+                # stackoverflow.com/questions/7908636/is-it-possible-to-make-labels-appear-when-hovering-mouse-over-a-point-in-matplot
+                def update_annot(event):
+                    ind = event.ind
+                    pos = event.artist.get_offsets()[ind[0]]
+                    annot.xy = pos
+                    # TODO: pt identified by its value, could be multiple pts
+                    real_idx = np.where((data[:, :2] == pos).all(axis=1))[0][0]
+                    name = names[real_idx]
+                    txt = f'{name}\n'
+                    for feat_name in self.features.columns:
+                        txt += f'{feat_name}: '
+                        txt += f'{self.features.iloc[real_idx][feat_name]}, '
+
+                    annot.set_text(txt)
+
+                    try:
+                        img = plt.imread(name)
+                        imagebox = OffsetImage(img)
+                        imagebox.image.axes = ax
+                        ab.offsetbox = imagebox
+                        ab.xy = pos
+                    except Exception:
+                        pass
+                    annot.get_bbox_patch().set_alpha(0.4)
+                    annot.set_wrap(True)
+
+                def onpick(event):
+                    vis = annot.get_visible()
+                    nonlocal ab_artist
+                    if vis:
+                        annot.set_visible(False)
+                        ab_artist.remove()
+                        fig.canvas.draw_idle()
+                    else:
+                        update_annot(event)
+                        annot.set_visible(True)
+                        ab_artist = ax.add_artist(ab)
+                        fig.canvas.draw_idle()
+
+                fig.canvas.mpl_connect('pick_event', onpick)
                 plt.xlabel('PC1'), plt.ylabel('PC2')
                 plt.legend(title='Groups')
                 nonlocal cluster_plot
@@ -990,7 +1046,7 @@ class Groups:
             morphological features.
 
         """
-        all_features = list(_ALL_FEATURE_NAMES)
+        all_features = self.features.columns.to_list()
         labels = iter(self.labels.values())
 
         if on_features is None:
@@ -1007,7 +1063,7 @@ class Groups:
         lda_object = LDA(n_components=n_components, store_covariance=True)
 
         # Scale data
-        scaler = preprocessing.MaxAbsScaler()
+        scaler = preprocessing.StandardScaler()
         scaler.fit(subset_features)
         X = scaler.transform(subset_features)
 
