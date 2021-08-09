@@ -33,7 +33,7 @@ class Cell:
         applied, by default 'otsu'
     reference_image : ndarray
         `image` would be standardized to the exposure level of this example.
-    shell_step_size : int, optional
+    sholl_step_size : int, optional
         Difference (in pixels) between concentric Sholl circles, by default 3
     polynomial_degree : int, optional
         Degree of polynomial for fitting regression model on sholl values, by
@@ -59,7 +59,7 @@ class Cell:
 
     """
     __slots__ = ('image', 'image_type', 'cleaned_image', 'features',
-                 'convex_hull', 'skeleton', 'shell_step_size', '_fork_coords',
+                 'convex_hull', 'skeleton', 'sholl_step_size', '_fork_coords',
                  '_branch_coords', '_branching_struct', '_concentric_coords',
                  '_sholl_intersections', '_padded_skeleton', '_pad_sk_soma',
                  '_sholl_polynomial_model', '_polynomial_sholl_radii',
@@ -73,18 +73,18 @@ class Cell:
         contrast_ptiles=(0, 100),
         threshold_method='otsu',
         reference_image=None,
-        shell_step_size=3,
+        sholl_step_size=3,
         polynomial_degree=3
     ):
         image = (cell_image if cell_image.ndim == 2
                  else rgb2gray(cell_image))
         self.image_type = image_type
-        self.shell_step_size = shell_step_size
+        self.sholl_step_size = sholl_step_size
         self.image, self.cleaned_image = preprocess_image(
             image, image_type, reference_image, crop_tech,
             contrast_ptiles, threshold_method)
         self.features = _extract_cell_features(
-            self, shell_step_size, polynomial_degree)
+            self, sholl_step_size, polynomial_degree)
 
     def plot_convex_hull(self):
         """Plots convex hull of the skeleton of the cell."""
@@ -192,7 +192,7 @@ class Cell:
         ax.add_patch(c)
         ax.set_axis_off()
 
-        radius = self.shell_step_size
+        radius = self.sholl_step_size
         sholl_intersections = self._sholl_intersections
 
         # plot circles on skeleton
@@ -220,11 +220,11 @@ class Cell:
         skeleton.
 
         """
-        shell_step_sz = self.shell_step_size
+        sholl_step_sz = self.sholl_step_size
         last_intersection_idx = np.max(np.nonzero(self._sholl_intersections))
-        non_zero_radii = range(shell_step_sz,
-                               (last_intersection_idx + 2) * shell_step_sz,
-                               shell_step_sz)
+        non_zero_radii = range(sholl_step_sz,
+                               (last_intersection_idx + 2) * sholl_step_sz,
+                               sholl_step_sz)
 
         x_ = self._polynomial_sholl_radii
         y_data = self._non_zero_sholl_intersections

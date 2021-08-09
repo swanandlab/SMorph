@@ -7,6 +7,8 @@ import ipyvolume as ipv
 import matplotlib.pyplot as plt
 import numpy as np
 import tifffile
+from matplotlib.colors import BASE_COLORS, CSS4_COLORS
+from matplotlib.lines import Line2D
 from matplotlib.offsetbox import AnnotationBbox, OffsetImage
 from matplotlib.patches import Ellipse
 from pandas import DataFrame
@@ -19,7 +21,7 @@ from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
 
 from ..util._io import (
     df_to_csv,
-    read_groups_folders,
+    read_group_folders,
     silent_remove_file,
     mkdir_if_not,
     savefig
@@ -53,12 +55,12 @@ _ALL_FEATURE_NAMES = (
 
 
 def _analyze_cells(
-    groups_folders,
+    group_folders,
     img_type,
     groups_crop_tech,
     contrast_ptiles,
     threshold_method,
-    shell_step_sz,
+    sholl_step_sz,
     poly_degree,
     save_results,
     show_logs
@@ -67,7 +69,7 @@ def _analyze_cells(
 
     Parameters
     ----------
-    groups_folders : list
+    group_folders : list
         A list of strings containing path of each folder with image dataset.
     img_type : str
         Neuroimaging technique used to get image data of neuronal cell,
@@ -87,10 +89,10 @@ def _analyze_cells(
         'mean', 'minimum', 'triangle', 'yen'. If None & crop_tech is 'auto' &
         contrast stretch is (0, 100), a single intensity threshold of zero is
         applied, by default 'otsu'
-    shell_step_sz : int
+    sholl_step_sz : int
         Difference (in pixels) between concentric Sholl circles, by default 3
     poly_degree : int, optional
-        Degree of polynomial for fitting regression model on sholl values, by
+        Degree of polynomial for fitting regression model on Sholl values, by
         default 3
     save_results : bool
         To save the features into a file.
@@ -116,7 +118,7 @@ def _analyze_cells(
         Names of each cell image file.
 
     """
-    file_names, dataset = read_groups_folders(groups_folders)
+    file_names, dataset = read_group_folders(group_folders)
     SKIPPED_CELLS_FILENAME = 'skipped_cells.txt'
 
     dataset_features, targets = [], []
@@ -127,7 +129,7 @@ def _analyze_cells(
     group_cnts = []
     bad_cells_idx = []
     cell_cnt = 0
-    N_GROUPS = len(groups_folders)
+    N_GROUPS = len(group_folders)
 
     if groups_crop_tech is None:
         groups_crop_tech = ['manual' for i in range(N_GROUPS)]
@@ -149,7 +151,7 @@ def _analyze_cells(
                             crop_tech=groups_crop_tech[group_no],
                             contrast_ptiles=contrast_ptiles,
                             threshold_method=threshold_method,
-                            shell_step_size=shell_step_sz,
+                            sholl_step_size=sholl_step_sz,
                             polynomial_degree=poly_degree)
                 cell_features = list(cell.features.values())
 
@@ -200,7 +202,7 @@ class Groups:
 
     Parameters
     ----------
-    groups_folders : list
+    group_folders : list
         Path to folders containing input cell images with each path
         corresponding to different subgroups.
     image_type : str
@@ -212,7 +214,7 @@ class Groups:
         tissue image, elements can be either 'manual' or 'auto', by default
         'manual' for all groups. (Assumes all images in a group are captured
         via the same cropping technique)
-    labels : dict
+    labels : dict or list
         Group labels to be used for visualization. Specify for each group.
     contrast_ptiles : tuple of size 2, optional
         `(low_percentile, hi_percentile)` Contains ends of band of percentile
@@ -224,10 +226,10 @@ class Groups:
         'mean', 'minimum', 'triangle', 'yen'. If None & crop_tech is 'auto' &
         contrast stretch is (0, 100), a single intensity threshold of zero is
         applied, by default 'otsu'
-    shell_step_size : int, optional
+    sholl_step_size : int, optional
         Difference (in pixels) between concentric Sholl circles, by default 3
     polynomial_degree : int, optional
-        Degree of polynomial for fitting regression model on sholl values, by
+        Degree of polynomial for fitting regression model on Sholl values, by
         default 3
     save_results : bool, optional
         To save analysis results, by default True
@@ -239,7 +241,7 @@ class Groups:
     features : DataFrame
         A DataFrame representing 23 morphometric of individual cells from
         each group.
-    shell_step_size : int
+    sholl_step_size : int
         Difference (in pixels) between concentric Sholl circles, by default 3
     file_names : list
         Names of each cell image file.
@@ -268,23 +270,23 @@ class Groups:
     __slots__ = ('features', 'targets', 'sholl_original_plots', 'labels',
                  'sholl_polynomial_plots', 'pca_feature_names', 'markers',
                  'feature_significance', 'file_names', 'group_counts',
-                 'projected', 'shell_step_size', 'save')
+                 'projected', 'sholl_step_size', 'save')
 
     def __init__(
         self,
-        groups_folders,
+        group_folders,
         image_type,
         groups_crop_tech,
         labels,
         contrast_ptiles=(0, 100),
         threshold_method='otsu',
-        shell_step_size=3,
+        sholl_step_size=3,
         polynomial_degree=3,
         save_results=True,
         show_logs=False
     ):
         self.labels = labels
-        self.shell_step_size = shell_step_size
+        self.sholl_step_size = sholl_step_size
         self.save = save_results
 
         (
@@ -294,8 +296,8 @@ class Groups:
             self.sholl_polynomial_plots,
             self.group_counts,
             self.file_names
-        ) = _analyze_cells(groups_folders, image_type, groups_crop_tech,
-                           contrast_ptiles, threshold_method, shell_step_size,
+        ) = _analyze_cells(group_folders, image_type, groups_crop_tech,
+                           contrast_ptiles, threshold_method, sholl_step_size,
                            polynomial_degree, save_results, show_logs)
 
         self.pca_feature_names = None
@@ -320,7 +322,7 @@ class Groups:
 
         """
         file_names = self.file_names
-        shell_step_sz = self.shell_step_size
+        sholl_step_sz = self.sholl_step_size
         polynomial_plots = list(map(lambda x: list(x),
                                     self.sholl_polynomial_plots))
         group_cnts = self.group_counts
@@ -331,9 +333,9 @@ class Groups:
         polynomial_plots = np.array([
             x+[0]*(len_polynomial_plots-len(x)) for x in polynomial_plots])
 
-        x = list(range(shell_step_sz,
-                       shell_step_sz * len_polynomial_plots + 1,
-                       shell_step_sz))
+        x = list(range(sholl_step_sz,
+                       sholl_step_sz * len_polynomial_plots + 1,
+                       sholl_step_sz))
 
         lft_idx = 0
         for group_no, group_cnt in enumerate(group_cnts):
@@ -371,9 +373,9 @@ class Groups:
         if save_results or self.save:
             # single_cell_intersections
             DIR, OUTFILE = '/Results/', 'sholl_intersections.csv'
-            cols = list(range(shell_step_sz,
-                              (len_polynomial_plots + 1) * shell_step_sz,
-                              shell_step_sz))
+            cols = list(range(sholl_step_sz,
+                              (len_polynomial_plots + 1) * sholl_step_sz,
+                              sholl_step_sz))
 
             write_buffer = DataFrame(file_names, columns=['file_name'])
             df_polynomial_plots = DataFrame(polynomial_plots, columns=cols)
@@ -418,8 +420,8 @@ class Groups:
     def pca(
         self,
         n_PC,
-        color_dict,
-        markers,
+        color_dict=None,
+        markers=None,
         on_features=None,
         save_results=True
     ):
@@ -431,10 +433,10 @@ class Groups:
             If greater than 1, return n_PC number of Principal Components
             after clustering. If None & use_features is False, it's
             autoselected as number of Principal Components calculated.
-        color_dict : dict
-            Dict with color to be used for each group.
-        marker : dict
-            Dict with marker for each group to be used in PCA plot.
+        color_dict : dict or list, optional
+            Dict or list with colors to be used for each group.
+        marker : dict or list, optional
+            Dict or list with markers for each group to be used in PCA plot.
         on_features : list, optional
             List of names of morphological features from which Principal
             Components will be derived, by default None.
@@ -475,6 +477,12 @@ class Groups:
                              'of the original set of morphological features.')
 
         self.pca_feature_names = on_features
+        n_groups = len(self.group_counts)
+        if color_dict is None:
+            color_dict = [*BASE_COLORS.keys(), *CSS4_COLORS.keys()][:n_groups]
+        if markers is None:
+            markers = sorted(list(Line2D.markers.keys())[:-16])[-n_groups:]
+            markers = ['o', '^', '*', *markers]
         self.markers = markers
 
         def get_cov_ellipse(cov, centre, nstd, **kwargs):
@@ -588,8 +596,8 @@ class Groups:
 
         """
         if not set(features).issubset(features):
-            raise ValueError('Given feature names must be a subset or equal to '
-                             'set of 23 Morphometric features.')
+            raise ValueError('Given feature names must be a subset or equal to'
+                             ' set of 23 Morphometric features.')
 
         axes = plt.subplots((len(features)+1)//2, 2, figsize=(15, 12))[1]
         data = self.features[features].to_numpy()
@@ -745,8 +753,10 @@ class Groups:
         """
         all_features = self.features
         group_cnts = self.group_counts.copy()
-        labels = iter(self.labels.values())
-        markers = iter(self.markers.values())
+        labels = iter(self.labels if type(self.labels == list)
+                      else self.labels.values())
+        markers = iter(self.markers if type(self.markers == list)
+                       else self.markers.values())
         n_cells = all_features.shape[0]
         seed = np.random.randint(0, n_cells)  # for deterministic randomness
 
@@ -1047,7 +1057,8 @@ class Groups:
 
         """
         all_features = self.features.columns.to_list()
-        labels = iter(self.labels.values())
+        labels = iter(self.labels if type(self.labels == list)
+                                  else self.labels.values())
 
         if on_features is None:
             on_features = all_features
@@ -1056,7 +1067,8 @@ class Groups:
                              'of the original set of morphological features.')
 
         # self.pca_feature_names = on_features
-        markers = iter(self.markers.values())
+        markers = iter(self.markers if type(self.markers == list)
+                                    else self.markers.values())
 
         subset_features = self.features[on_features].to_numpy()
 
