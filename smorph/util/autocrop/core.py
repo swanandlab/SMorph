@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib import gridspec
 from psutil import virtual_memory
 from scipy.spatial import ConvexHull
 from skimage.draw import polygon2mask
@@ -14,35 +15,27 @@ from skimage.util import unique_rows
 
 def testThresholds(
     edge_filtered,
-    voxel_sz_x,
-    voxel_sz_y,
-    voxel_sz_z,
-    cmap='gray',
     low_thresh=.06,
     high_thresh=.45,
     low_delta=.01,
     high_delta=.05,
-    n=1
+    n=1,
+    cmap='gray'
 ):
-    aspect_xz = voxel_sz_z / voxel_sz_x
-    aspect_yz = voxel_sz_z / voxel_sz_y
-    N_ROWS = 2 * n + 1
-    fig, axes = plt.subplots(ncols=3, nrows=N_ROWS, figsize=(15, 8))
+    N_COLS = 2 * n + 1
+    fig, axes = plt.subplots(ncols=N_COLS, nrows=1, figsize=((8, 8)
+                             if N_COLS == 1 else (16, 16)))
     low_thresh -= low_delta * n
     high_thresh -= high_delta * n
     out = []
-
-    for i in range(N_ROWS):
+    for i in range(N_COLS):
         thresholded = threshold(edge_filtered, low_thresh + i * low_delta,
                                 high_thresh + i * high_delta)
         labels = label_thresholded(thresholded)
-        axes[i, 0].set_ylabel(f'L:{low_thresh + i * low_delta:.2f},\n'
-                              f'H:{high_thresh + i * high_delta:.2f}',
-                              rotation=75)
-        axes[i, 0].imshow(np.max(labels, axis=0), cmap=cmap)
-        # axes[i, 0].yaxis.tick_right()
-        axes[i, 1].imshow(np.max(labels, axis=1), cmap, aspect=aspect_xz)
-        axes[i, 2].imshow(np.max(labels, axis=2), cmap, aspect=aspect_yz)
+        curr_ax = axes if N_COLS == 1 else axes[i]
+        curr_ax.imshow(labels.max(axis=0), cmap=cmap)
+        curr_ax.set_title(f'L:{low_thresh + i * low_delta:.4f}, '
+                        f'H:{high_thresh + i * high_delta:.4f}')
         out.append({'data': labels, 'colormap': 'gist_earth', 'gamma': .8,
                     'name': (f'L:{low_thresh + i * low_delta:.3f}, '
                              f'H:{high_thresh + i * high_delta:.3f}')})
@@ -71,11 +64,21 @@ def projectXYZ(img, voxel_sz_x, voxel_sz_y, voxel_sz_z, cmap='gray'):
     """
     aspect_xz = voxel_sz_z / voxel_sz_x
     aspect_yz = voxel_sz_z / voxel_sz_y
-    fig, axes = plt.subplots(ncols=3, nrows=1, figsize=(15, 8))
+    fig = plt.figure(figsize=(8, 8))
+    gs = gridspec.GridSpec(2, 2, width_ratios=[img.shape[2]*voxel_sz_x,
+                                               img.shape[0]*voxel_sz_z],
+                           height_ratios=[img.shape[1]*voxel_sz_y,
+                                          img.shape[0]*voxel_sz_z])
+    ax = plt.subplot(gs[0, 0])
+    axr = plt.subplot(gs[0, 1], sharey=ax)
+    axb = plt.subplot(gs[1, 0], sharex=ax)
 
-    axes[0].imshow(np.max(img, axis=0), cmap=cmap)
-    axes[1].imshow(np.max(img, axis=1), cmap, aspect=aspect_xz)
-    axes[2].imshow(np.max(img, axis=2), cmap, aspect=aspect_yz)
+    ax.imshow(np.max(img, axis=0), cmap=cmap)
+    axb.imshow(np.max(img, axis=1), cmap, aspect=aspect_xz)
+    axr.imshow(np.max(img, axis=2).T, cmap, aspect=1/aspect_yz)
+    plt.setp(ax.get_xticklabels(), visible=False)
+    plt.setp(axr.get_yticklabels(), visible=False)
+    plt.tight_layout()
     plt.show()
 
 
