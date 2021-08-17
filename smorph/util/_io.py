@@ -12,12 +12,18 @@ def silent_remove_file(filename):
             raise
 
 
-def read_groups_folders(groups_folders):
+def mkdir_if_not(name):
+    """Collision-free mkdir"""
+    if not (path.exists(name) and path.isdir(name)):
+        mkdir(name)
+
+
+def read_group_folders(group_folders):
     """Synchronously read list of folders for images.
 
     Parameters
     ----------
-    groups_folders : list
+    group_folders : list
         A list of strings containing path of each folder with image dataset.
 
     Returns
@@ -30,7 +36,7 @@ def read_groups_folders(groups_folders):
     """
     file_names, dataset = [], []
 
-    for group in groups_folders:
+    for group in group_folders:
         group_data = []
         for file in listdir(group):
             if not file.startswith('.'):  # skip hidden files
@@ -64,3 +70,7 @@ def df_to_csv(df, folder, out_file_name):
         remove(FILE)
 
     df.to_csv(DIR + out_file_name, index=False, mode='w')
+
+
+def savefig(fig, name):
+    fig.savefig(getcwd() + name, transparent=False, facecolor='w')
