@@ -1,5 +1,9 @@
+import czifile
 import matplotlib.pyplot as plt
 import numpy as np
+import psf
+import skimage
+
 from matplotlib import gridspec
 from psutil import virtual_memory
 from scipy.spatial import ConvexHull
@@ -68,7 +72,8 @@ def projectXYZ(img, voxel_sz_x, voxel_sz_y, voxel_sz_z, cmap='gray'):
     gs = gridspec.GridSpec(2, 2, width_ratios=[img.shape[2]*voxel_sz_x,
                                                img.shape[0]*voxel_sz_z],
                            height_ratios=[img.shape[1]*voxel_sz_y,
-                                          img.shape[0]*voxel_sz_z])
+                                          img.shape[0]*voxel_sz_z],
+                           wspace=.05, hspace=.05)
     ax = plt.subplot(gs[0, 0])
     axr = plt.subplot(gs[0, 1], sharey=ax)
     axb = plt.subplot(gs[1, 0], sharex=ax)
@@ -78,7 +83,6 @@ def projectXYZ(img, voxel_sz_x, voxel_sz_y, voxel_sz_z, cmap='gray'):
     axr.imshow(np.max(img, axis=2).T, cmap, aspect=1/aspect_yz)
     plt.setp(ax.get_xticklabels(), visible=False)
     plt.setp(axr.get_yticklabels(), visible=False)
-    plt.tight_layout()
     plt.show()
 
 
@@ -132,6 +136,68 @@ def denoise(img, denoise_parameters):
         denoised[i] = denoise_nl_means(img[i], **denoise_parameters)
 
     return denoised
+
+
+def deconvolve(img, impath, iters=8):
+    """Do in-place deconvolution.
+
+    Parameters
+    ----------
+    img : ndarray
+        Image data.
+    impath : str
+        Path to the original image file.
+    iters : int, optional
+        Number of iterations for deconvolution, by default 8
+
+    Returns
+    -------
+    ndarray
+        Deconvolved image data.
+
+    """
+    impath = impath.lower()
+    if impath.split('.')[-1] == 'czi':
+        czimeta = czifile.CziFile(impath).metadata(False)
+        metadata = czimeta['ImageDocument']['Metadata']
+        im_meta = metadata['Information']['Image']
+        refr_index = im_meta['ObjectiveSettings']['RefractiveIndex']
+
+        selected_channel = None
+        for i in im_meta['Dimensions']['Channels']['Channel']:
+            if i['ContrastMethod'] == 'Fluorescence':
+                selected_channel = i
+        ex_wavelen = selected_channel['ExcitationWavelength']
+        em_wavelen = selected_channel['EmissionWavelength']
+
+        selected_detector = None
+        for i in metadata['Experiment']['ExperimentBlocks']['AcquisitionBlock'
+            ]['MultiTrackSetup']['TrackSetup']['Detectors']['Detector']:
+            if i['PinholeDiameter'] > 0:
+                selected_detector = i
+        pinhole_radius = selected_detector['PinholeDiameter'] / 2 * 1e6
+
+        num_aperture = metadata['Information']['Instrument']['Objectives'][
+            'Objective']['LensNA']
+        dim_r = metadata['Scaling']['Items']['Distance'][0]['Value'] * 1e6
+        dim_z = metadata['Scaling']['Items']['Distance'][-1]['Value'] * 1e6
+
+        args = dict(
+            shape=(3, 3),  # # of samples in z & r direction
+            dims=(dim_z, dim_r),  # size in z & r direction in microns
+            ex_wavelen=ex_wavelen,  # nm
+            em_wavelen=em_wavelen,  # nm
+            num_aperture=num_aperture,
+            refr_index=refr_index,
+            pinhole_radius=pinhole_radius,  # microns
+            pinhole_shape='square'
+        )
+        obsvol = psf.PSF(psf.ISOTROPIC | psf.CONFOCAL, **args)
+        impsf = obsvol.volume()
+
+        img = skimage.restoration.richardson_lucy(img, impsf, iterations=iters)
+
+    return img
 
 
 def filter_edges(img):

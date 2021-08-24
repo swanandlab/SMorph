@@ -234,7 +234,8 @@ def export_cells(
                                  pad_width=max(segmented.shape[1:]) // 5,
                                  mode='constant')
                     out_name = f'{OUT_DIR}{SEG_TYPES[0]}_{OUT_TYPES[1]}/'+name
-                    tifffile.imsave(out_name.replace('.tif', '_mip.tif'), out, description=out_metadata,
+                    tifffile.imsave(out_name.replace('.tif', '_mip.tif'), out,
+                                    description=out_metadata,
                                     software='Autocrop')
                 else:
                     out = segmented if out_type == OUT_TYPES[0] else np.pad(
@@ -242,7 +243,8 @@ def export_cells(
                         pad_width=max(segmented.shape[1:]) // 5,
                         mode='constant')
                     out_name = f'{OUT_DIR}{SEG_TYPES[0]}_{out_type}/'+name
-                    tifffile.imsave(out_name.replace('.tif', '_mip.tif'), out, description=out_metadata,
+                    tifffile.imsave(out_name.replace('.tif', '_mip.tif'), out,
+                                    description=out_metadata,
                                     software='Autocrop')
 
             if seg_type == SEG_TYPES[1] or seg_type == SEG_TYPES[2]:
@@ -292,7 +294,8 @@ def export_cells(
                 segmented = img_as_ubyte(segmented)
 
                 try:
-                    markers = _get_blobs(segmented, 'confocal').astype(int)[:, :-1]
+                    markers = _get_blobs(segmented, 'confocal')
+                    markers = markers.astype(int)[:, :-1]
                 except:
                     markers = np.array([np.array(segmented.shape)]) // 2
                     markers = markers[:, [0, 2, 1]]

@@ -3,6 +3,7 @@ from .core import (
     projectXYZ,
     calibrate_nlm_denoiser,
     denoise,
+    deconvolve,
     threshold,
     label_thresholded,
     filter_labels,
