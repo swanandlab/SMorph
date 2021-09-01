@@ -57,9 +57,8 @@ doc/_build/
 
 # Analysis results
 Datasets/
-Features/
-Sholl Results/
-PCA Results/
+Results/
+Autocropped/
 
-pca values
+*.csv
 skipped_cells.txt

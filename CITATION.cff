@@ -1,0 +1,37 @@
+cff-version: "1.1.0"
+message: "If you use this software, please cite it using these metadata."
+authors: 
+  -
+    affiliation: "Centre for Neuroscience, Indian Institute of Science, Bangalore, India 560012"
+    family-names: Sethi
+    given-names: Parul
+    orcid: "https://orcid.org/0000-0003-2913-2261"
+  -
+    affiliation: "Centre for Neuroscience, Indian Institute of Science, Bangalore, India 560012"
+    family-names: Virmani
+    given-names: Garima
+    orcid: "https://orcid.org/0000-0002-4225-3132"
+  -
+    affiliation: "Centre for Neuroscience, Indian Institute of Science, Bangalore, India 560012"
+    family-names: Gupta
+    given-names: Kushaan
+    orcid: "https://orcid.org/0000-0002-8491-0743"
+  -
+    affiliation: "Centre for Neuroscience, Indian Institute of Science, Bangalore, India 560012"
+    family-names: Thumu
+    given-names: "S.C.R."
+  -
+    affiliation: "Centre for Neuroscience, Indian Institute of Science, Bangalore, India 560012"
+    family-names: Ramanan
+    given-names: Narendrakumar
+    orcid: "https://orcid.org/0000-0002-6088-9599"
+  -
+    affiliation: "Centre for Neuroscience, Indian Institute of Science, Bangalore, India 560012"
+    family-names: Marathe
+    given-names: Swananda
+    orcid: "https://orcid.org/0000-0002-2539-366X"
+title: "Automated morphometric analysis with SMorph software reveals plasticity induced by antidepressant therapy in hippocampal astrocytes"
+doi: "10.1242/jcs.258430"
+date-released: 2021-06-17
+repository-code: "https://github.com/swanandlab/SMorph"
+license: "GPL-3.0-only"
