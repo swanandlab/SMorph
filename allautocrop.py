@@ -1,3 +1,4 @@
+import numpy as np
 import smorph.util.autocrop as ac
 from os import getcwd, listdir, mkdir, path
 from time import time
@@ -9,77 +10,43 @@ import czifile, psf, skimage
 ROOT = 'Datasets'
 
 SECTIONS = [
-    'Garima Confocal/SAL,DMI, FLX ADN HALO_TREATMENT_21 DAYS/allImg/HILUS'
+    'Garima Confocal/SAL,DMI, FLX ADN HALO_TREATMENT_28 DAYS/control_28 days/all'
 ]
 
-params = {'LOW_THRESH': .05,
+params = {'LOW_THRESH': .07,
           'HIGH_THRESH': .2,
           'SELECT_ROI': True,
-          'NAME_ROI': 'Hilus',
+          'NAME_ROI': 'HilusMan',
           'LOW_VOLUME_CUTOFF': 200,  # filter noise/artifacts
           'HIGH_VOLUME_CUTOFF': 1e9,  # filter cell clusters
           'OUTPUT_TYPE': 'both'
 }
 
-# ROI_FILE = r'crop manual\M3_LEFT_ML_CELL CROP\RoiSet_LB_CELLS.zip'
-# rois = read_roi_zip(ROI_FILE)
-
-# if rois[list(rois)[1]]['type'] != 'point':
-#     raise ValueError('Cannot read points from ROI zip file')
-
-# points = rois[list(rois)[1]]
-
 start = time()
 
 for section in SECTIONS:
     for file in listdir(ROOT + '/' + section):
-        if not file.startswith('.'):  # skip hidden files
+        print(file)
+        if not file.startswith('.') and file.endswith('.czi') and 'HILUS' in file:  # skip hidden files
             try:
                 CONFOCAL_TISSUE_IMAGE = ROOT + '/' + section + '/' + file
 
                 original = ac.import_confocal_image(CONFOCAL_TISSUE_IMAGE)
 
                 # 2. Non-local means denoising using auto-calibrated parameters
-                denoiser = ac.calibrate_nlm_denoiser(original)
-                denoise_parameters = denoiser.keywords['denoiser_kwargs']
-                denoised = ac.denoise(original, denoise_parameters)
+                if original.ndim == 2:
+                    original = (original - original.min()) / (original.max() - original.min())
+                    
+                    original = np.expand_dims(original, 0)
 
-                czimeta = czifile.CziFile(CONFOCAL_TISSUE_IMAGE).metadata(False)
-                refr_index = czimeta['ImageDocument']['Metadata']['Information']['Image']['ObjectiveSettings']['RefractiveIndex']
+                deconvolved = ac.deconvolve(original, CONFOCAL_TISSUE_IMAGE, iters=10)
+                # denoiser = ac.calibrate_nlm_denoiser(deconvolved)
+                # denoise_parameters = denoiser.keywords['denoiser_kwargs']
+                # print(denoise_parameters)
+                # denoised = ac.denoise(deconvolved, denoise_parameters)
+                denoised = deconvolved
 
-                selected_channel = None
-                for i in czimeta['ImageDocument']['Metadata']['Information']['Image']['Dimensions']['Channels']['Channel']:
-                    if i['ContrastMethod'] == 'Fluorescence':
-                        selected_channel = i
-                ex_wavelen = selected_channel['ExcitationWavelength']
-                em_wavelen = selected_channel['EmissionWavelength']
-
-                selected_detector = None
-                for i in czimeta['ImageDocument']['Metadata']['Experiment']['ExperimentBlocks']['AcquisitionBlock']['MultiTrackSetup']['TrackSetup']['Detectors']['Detector']:
-                    if i['PinholeDiameter'] > 0:
-                        selected_detector = i
-                pinhole_radius = selected_detector['PinholeDiameter'] / 2 * 1e6
-
-                num_aperture = czimeta['ImageDocument']['Metadata']['Information']['Instrument']['Objectives']['Objective']['LensNA']
-                dim_r = czimeta['ImageDocument']['Metadata']['Scaling']['Items']['Distance'][0]['Value'] * 1e6
-                dim_z = czimeta['ImageDocument']['Metadata']['Scaling']['Items']['Distance'][-1]['Value'] * 1e6
-
-                args = dict(
-                    shape=(3, 3),  # # of samples in z & r direction
-                    dims=(dim_z, dim_r),  # size in z & r direction in microns
-                    ex_wavelen=ex_wavelen,  # nm
-                    em_wavelen=em_wavelen,  # nm
-                    num_aperture=num_aperture,
-                    refr_index=refr_index,
-                    pinhole_radius=pinhole_radius,  # microns
-                    pinhole_shape='square'
-                )
-                obsvol = psf.PSF(psf.ISOTROPIC | psf.CONFOCAL, **args)
-                psf_vol = obsvol.volume()
-
-                denoised = skimage.restoration.richardson_lucy(denoised, psf_vol, iterations=8)
-
-                FILE_ROI = CONFOCAL_TISSUE_IMAGE.replace(CONFOCAL_TISSUE_IMAGE.split('/')[3], 'allRoi')[:-4] + '.roi'
+                FILE_ROI = CONFOCAL_TISSUE_IMAGE[:-4] + '.roi'  # .replace(CONFOCAL_TISSUE_IMAGE.split('/')[3], 'allRoi')[:-4] + '.roi'
                 # FILE_ROI = FILE_ROI.replace(FILE_ROI.split('/')[-1], 'RoiSet MAX_' + FILE_ROI.split('/')[-1])
                 print(FILE_ROI)
 
@@ -92,6 +59,7 @@ for section in SECTIONS:
                                                         linebuilder)
 
                 # 3. Segmentation
+                # params['LOW_THRESH'] = params['HIGH_THRESH'] = skimage.filters.threshold_otsu(denoised)
                 thresholded = ac.threshold(denoised, params['LOW_THRESH'],
                                             params['HIGH_THRESH'])
                 labels = ac.label_thresholded(thresholded)

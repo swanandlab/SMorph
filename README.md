@@ -45,7 +45,7 @@ The same notebook can also run on your local environment.
 
 ## Installation from source
 
-The code has been tested for Python 3.6.1 and above, if you don't have it
+The code has been tested for Python 3.7.11 and above, if you don't have it
 installed, please download the binaries from
 [here](https://www.python.org/downloads/) and
 follow the installation guide.

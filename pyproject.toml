@@ -25,6 +25,8 @@ roifile = "2020.11.28"
 shapely = "^1.7.1"
 uuid = "^1.30"
 ipympl = "^0.7.0"
+psf = "^2021.6.6"
+PyQt5 = "^5.15.4"
 
 [tool.poetry.dev-dependencies]
 
