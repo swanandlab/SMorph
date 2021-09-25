@@ -25,7 +25,7 @@ def postprocess_segment(SOMA_SELECTED_DIR, reconstructed_labels=None):
     roi_path = None
 
     for file in listdir(folder):
-        if not file.startswith('.') and file.endswith(('.tif', '.tiff')):
+        if not file.startswith('.') and file.endswith(('.tif', '.tiff')) and '_mip' not in file:
             name = folder + '/' + file
             image = tifffile.TiffFile(name)
             metadata = image.pages[0].tags['ImageDescription'].value
@@ -67,3 +67,52 @@ def postprocess_segment(SOMA_SELECTED_DIR, reconstructed_labels=None):
                 print(e)
     reconstructed_labels = label(reconstructed_labels)
     return reconstructed_labels, parent_path, roi_path
+
+
+def manual_postprocess(SOMA_SELECTED_DIR, reconstructed_seg=None):
+    folder = SOMA_SELECTED_DIR
+    parent_path = None
+    roi_path = None
+    somas_est = []
+
+    for file in listdir(folder):
+        if not file.startswith('.') and file.endswith(('.tif', '.tiff')) and '_mip' not in file:
+            name = folder + '/' + file
+            image = tifffile.TiffFile(name)
+            metadata = image.pages[0].tags['ImageDescription'].value
+            # print(file)
+            metadata = json.loads(metadata)
+
+            try:
+                # look for ROI in same directory
+                roi = roifile.roiread(folder + '/' + \
+                                        '.'.join(file.split('.')[:-1]) + '.roi')
+                yx = roi.coordinates()[:, [1, 0]]
+                z = roi.counter_positions - 1
+                somas_coords = np.insert(yx, 0, z, axis=1).astype(int)
+                im = image.asarray()
+
+                parent_path = metadata['parent_image']
+                roi_path = metadata['roi_path']
+
+                if reconstructed_seg is None:
+                    parent = import_confocal_image(parent_path)
+                    reconstructed_seg = np.zeros(parent.shape)
+
+                minz, miny, minx, maxz, maxy, maxx = metadata['bounds']
+                linebuilder = _load_ROI(roi_path)
+                X, Y = _unwrap_polygon(linebuilder)
+                min_x, max_x = int(min(X)), int(max(X) + 1)
+                min_y, max_y = int(min(Y)), int(max(Y) + 1)
+                miny += min_y
+                maxy += min_y
+                minx += min_x
+                maxx += min_x
+                reconstructed_seg[minz:maxz, miny:maxy, minx:maxx] += im
+
+                somas_coords = np.array(somas_coords) + np.array([[minz, miny, minx]])
+                somas_est.extend(somas_coords)
+            except Exception as e:
+                print(e)
+
+    return reconstructed_seg, parent_path, roi_path, np.array(somas_est)

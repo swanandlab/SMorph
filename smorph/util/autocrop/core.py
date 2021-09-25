@@ -172,7 +172,7 @@ def deconvolve(img, impath, iters=8):
 
         selected_detector = None
         for i in metadata['Experiment']['ExperimentBlocks']['AcquisitionBlock'
-            ]['MultiTrackSetup']['TrackSetup']['Detectors']['Detector']:
+            ]['MultiTrackSetup']['TrackSetup']['Detectors']['Detector']: # [0]['Detectors']['Detector']:
             if i['PinholeDiameter'] > 0:
                 selected_detector = i
         pinhole_radius = selected_detector['PinholeDiameter'] / 2 * 1e6
@@ -321,7 +321,7 @@ def filter_labels(labels, thresholded, polygon=None, conservative=True):
     return filtered_labels
 
 
-def _filter_small_objects(regions, cutoff_volume=27):
+def _filter_small_objects(regions, cutoff_volume=64):
     idx = 0
     for region in regions:
         if region.area > cutoff_volume:

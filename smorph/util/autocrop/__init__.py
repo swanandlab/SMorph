@@ -24,5 +24,6 @@ from ._io import (
 )
 
 from ._postprocessing import (
-    postprocess_segment
+    postprocess_segment,
+    manual_postprocess
 )

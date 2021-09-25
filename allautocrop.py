@@ -3,6 +3,7 @@ import smorph.util.autocrop as ac
 from os import getcwd, listdir, mkdir, path
 from time import time
 from skimage.filters import threshold_otsu
+from skimage import exposure
 import csv
 import json
 import czifile, psf, skimage
@@ -10,13 +11,13 @@ import czifile, psf, skimage
 ROOT = 'Datasets'
 
 SECTIONS = [
-    'Garima Confocal/SAL,DMI, FLX ADN HALO_TREATMENT_28 DAYS/control_28 days/all'
+    'Confocal/SAL,DMI, FLX ADN HALO_TREATMENT_21 DAYS/allImg/HILUS'
 ]
 
-params = {'LOW_THRESH': .07,
-          'HIGH_THRESH': .2,
+params = {'LOW_THRESH': .46,
+          'HIGH_THRESH': .75,
           'SELECT_ROI': True,
-          'NAME_ROI': 'HilusMan',
+          'NAME_ROI': 'HilusConEQ',
           'LOW_VOLUME_CUTOFF': 200,  # filter noise/artifacts
           'HIGH_VOLUME_CUTOFF': 1e9,  # filter cell clusters
           'OUTPUT_TYPE': 'both'
@@ -39,14 +40,17 @@ for section in SECTIONS:
                     
                     original = np.expand_dims(original, 0)
 
-                deconvolved = ac.deconvolve(original, CONFOCAL_TISSUE_IMAGE, iters=10)
+                # deconvolved = ac.deconvolve(original, CONFOCAL_TISSUE_IMAGE, iters=10)
                 # denoiser = ac.calibrate_nlm_denoiser(deconvolved)
                 # denoise_parameters = denoiser.keywords['denoiser_kwargs']
                 # print(denoise_parameters)
                 # denoised = ac.denoise(deconvolved, denoise_parameters)
-                denoised = deconvolved
+                # Adaptive Equalization
+                img_adapteq = exposure.equalize_adapthist(original, clip_limit=0.03)
+                denoised = img_adapteq
+                # denoised = deconvolved
 
-                FILE_ROI = CONFOCAL_TISSUE_IMAGE[:-4] + '.roi'  # .replace(CONFOCAL_TISSUE_IMAGE.split('/')[3], 'allRoi')[:-4] + '.roi'
+                FILE_ROI = CONFOCAL_TISSUE_IMAGE.replace(CONFOCAL_TISSUE_IMAGE.split('/')[3], 'allRoi')[:-4] + '-ML.roi'
                 # FILE_ROI = FILE_ROI.replace(FILE_ROI.split('/')[-1], 'RoiSet MAX_' + FILE_ROI.split('/')[-1])
                 print(FILE_ROI)
 
@@ -77,7 +81,7 @@ for section in SECTIONS:
                 ac.export_cells(CONFOCAL_TISSUE_IMAGE,
                                 params['LOW_VOLUME_CUTOFF'],
                                 params['HIGH_VOLUME_CUTOFF'],
-                                params['OUTPUT_TYPE'], denoised, regions, residue_regions,
+                                params['OUTPUT_TYPE'], original, regions, residue_regions,
                                 seg_type='both', roi_name=params['NAME_ROI'],
                                 roi_polygon=linebuilder, roi_path=FILE_ROI)
 
