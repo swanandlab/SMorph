@@ -36,6 +36,14 @@ def testThresholds(
         thresholded = threshold(edge_filtered, low_thresh + i * low_delta,
                                 high_thresh + i * high_delta)
         labels = label_thresholded(thresholded)
+        filtered_regions = arrange_regions(labels)
+        labels = np.zeros_like(thresholded, dtype=int)
+        reg_itr = 1
+        for region in filtered_regions:
+            minz, miny, minx, maxz, maxy, maxx = region.bbox
+            labels[minz:maxz, miny:maxy, minx:maxx] += region.filled_image * reg_itr
+            reg_itr += 1
+
         curr_ax = axes if N_COLS == 1 else axes[i]
         curr_ax.imshow(labels.max(axis=0), cmap=cmap)
         curr_ax.set_title(f'L:{low_thresh + i * low_delta:.4f}, '

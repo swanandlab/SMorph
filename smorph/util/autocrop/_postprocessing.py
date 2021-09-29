@@ -90,6 +90,10 @@ def manual_postprocess(SOMA_SELECTED_DIR, reconstructed_seg=None):
                 yx = roi.coordinates()[:, [1, 0]]
                 z = roi.counter_positions - 1
                 somas_coords = np.insert(yx, 0, z, axis=1).astype(int)
+            except Exception as e:
+                somas_coords = None
+
+            try:
                 im = image.asarray()
 
                 parent_path = metadata['parent_image']
@@ -110,8 +114,9 @@ def manual_postprocess(SOMA_SELECTED_DIR, reconstructed_seg=None):
                 maxx += min_x
                 reconstructed_seg[minz:maxz, miny:maxy, minx:maxx] += im
 
-                somas_coords = np.array(somas_coords) + np.array([[minz, miny, minx]])
-                somas_est.extend(somas_coords)
+                if somas_coords is not None:
+                    somas_coords = np.array(somas_coords) + np.array([[minz, miny, minx]])
+                    somas_est.extend(somas_coords)
             except Exception as e:
                 print(e)
 
