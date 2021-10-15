@@ -1004,6 +1004,21 @@ optional = false
 python-versions = "*"
 
 [[package]]
+name = "statannotations"
+version = "0.4.2"
+description = "add statistical significance or custom annotations on seaborn plots. Based on statannot 0.2.3"
+category = "main"
+optional = false
+python-versions = ">=3.6"
+
+[package.dependencies]
+matplotlib = ">=2.2.2"
+numpy = ">=1.12.1"
+pandas = ">=0.23.0"
+scipy = ">=1.1.0"
+seaborn = ">=0.9.0"
+
+[[package]]
 name = "terminado"
 version = "0.11.1"
 description = "Tornado websocket backend for the Xterm.js Javascript terminal emulator library."
@@ -1153,7 +1168,7 @@ testing = ["pytest (>=4.6)", "pytest-checkdocs (>=2.4)", "pytest-flake8", "pytes
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.6.1"
-content-hash = "32c4109923df035f4265a0743873a5f51b0b9ced21186e2e8590b4f23c810770"
+content-hash = "5ebec7b6c21c818a65b21ec150a3536309b0487c7df7f1ad05da37ff294afd7b"
 
 [metadata.files]
 appnope = [
@@ -1906,6 +1921,10 @@ six = [
 ]
 skan = [
     {file = "skan-0.9.tar.gz", hash = "sha256:41a263bd925365ff2ad86d9841e9e65259af7bce3f95504983a0af56b1a26b9d"},
+]
+statannotations = [
+    {file = "statannotations-0.4.2-py3-none-any.whl", hash = "sha256:f411781347eca07c93d48cd9ee495f4e92bf76c2b74e048f0b03d69a7ebcda64"},
+    {file = "statannotations-0.4.2.tar.gz", hash = "sha256:38165fb97971c04baf88b8b0674530eaa08a25440c4cc182a334a12296beb4ac"},
 ]
 terminado = [
     {file = "terminado-0.11.1-py3-none-any.whl", hash = "sha256:9e0457334863be3e6060c487ad60e0995fa1df54f109c67b24ff49a4f2f34df5"},

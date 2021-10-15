@@ -7,14 +7,16 @@ import ipyvolume as ipv
 import matplotlib.pyplot as plt
 import numpy as np
 import tifffile
+import seaborn as sns
 from matplotlib.colors import BASE_COLORS, CSS4_COLORS
 from matplotlib.lines import Line2D
 from matplotlib.offsetbox import AnnotationBbox, OffsetImage
 from matplotlib.patches import Ellipse
 from pandas import DataFrame
 from pandas.plotting import parallel_coordinates, scatter_matrix
-from scipy.stats import sem
+from scipy.stats import sem, ttest_ind
 from seaborn import color_palette
+from statannotations.Annotator import Annotator
 from sklearn import decomposition, metrics, preprocessing
 from sklearn.cluster import KMeans
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
@@ -350,12 +352,15 @@ class Groups:
                        sholl_step_sz))
 
         lft_idx = 0
+        err_fn = np.std if min(group_cnts) > 150 else sem
+        print('Error-bars represent:', err_fn)
+
         for group_no, group_cnt in enumerate(group_cnts):
             y = np.mean(polynomial_plots[lft_idx: lft_idx + group_cnt],
                         axis=0)
-            e = sem(polynomial_plots[lft_idx: lft_idx + group_cnt], axis=0)
+            e = err_fn(polynomial_plots[lft_idx: lft_idx + group_cnt], axis=0)
             lft_idx += group_cnt
-            plt.errorbar(x, y, yerr=e, label=labels[group_no])
+            plt.errorbar(x, y, yerr=e, label=labels[group_no], alpha=.8)
 
         if mark_avg_branch_lengths:
             ALPHA = .27
@@ -380,7 +385,6 @@ class Groups:
         plt.ylabel("No. of intersections")
         plt.legend()
         fig = plt.gcf()
-        plt.show()
 
         if save_results or self.save:
             # single_cell_intersections
@@ -394,8 +398,27 @@ class Groups:
             write_buffer[df_polynomial_plots.columns] = df_polynomial_plots
             df_to_csv(write_buffer, DIR, OUTFILE)
 
+            groups = []  # list of dfs
+            pvals = []
+            lft_idx = 0
+            for group_no, group_cnt in enumerate(group_cnts):
+                groups.append(write_buffer[lft_idx: lft_idx + group_cnt])
+                lft_idx += group_cnt
+            if len(groups) == 2:
+                for i in range(1, len(cols)+1):
+                    stat, pval = ttest_ind(groups[0].iloc[:, [i]],
+                                           groups[1].iloc[:, [i]],
+                                           equal_var=False)
+                    pvals.append(pval)
+
             OUTPLOT = 'avg_sholl_plot.png'
             savefig(fig, DIR + OUTPLOT)
+
+        for i in range(len(pvals)):
+            plt.text(x[i], plt.gca().get_ylim(),
+                     '*' if pvals[i] <= .05 else '-',
+                     ha='center', va='bottom')
+        plt.show()
 
     def plot_feature_scatter_matrix(self, on_features):
         """Plot feature scatter matrix.
@@ -597,6 +620,54 @@ class Groups:
         covariance_matix = pca_object.get_covariance()
 
         return feature_significance, covariance_matix, var_PCs
+
+    def plot_feature_bar_swarm(self, features=list(_ALL_FEATURE_NAMES)):
+        """Plots feature bar-swarm graphs for groups.
+
+        Raises
+        ------
+        ValueError
+            If `features` is not a subset of 23 Morphometric features.
+
+        """
+        if not set(features).issubset(features):
+            raise ValueError('Given feature names must be a subset or equal to'
+                             ' set of 23 Morphometric features.')
+
+        axes = plt.subplots((len(features)+1)//4, 4, figsize=(18, 18))[1]
+        data = self.features[features]
+
+        data['label'] = [self.labels[i] for i in range(len(self.group_counts))
+                         for j in range(self.group_counts[i])]
+        ax = axes.ravel()  # flat axes with numpy ravel
+        x = 'label'
+
+        for i in range(len(features)):
+            if min(self.group_counts) > 150:
+                sns.violinplot(y=features[i], x=x, data=data, ax=ax[i],
+                               order=self.labels)
+                sns.barplot(y=features[i], x=x, data=data, ax=ax[i],
+                            order=self.labels, alpha=.3)
+                sns.pointplot(x=x, y=features[i], data=data, ax=ax[i],
+                              color="black", linestyles='--', ci=None)
+            else:
+                sns.barplot(y=features[i], x=x, data=data, ci='sd', ax=ax[i],
+                            order=self.labels)
+                sns.swarmplot(data=data, x=x, y=features[i], order=self.labels,
+                              ax=ax[i], color='black', alpha=.3)
+                
+            annotator = Annotator(ax[i], [self.labels], data=data, x=x,
+                                  y=features[i])
+            annotator.configure(test='t-test_ind', text_format='star',
+                                loc='outside')
+            annotator.apply_and_annotate()
+            ax[i].set(xlabel=None)
+        plt.tight_layout()
+
+        if self.save:
+            savefig(plt, '/Results/feature_bar_swarm.png')
+
+        plt.show()
 
     def plot_feature_histograms(self, features=list(_ALL_FEATURE_NAMES)):
         """Plots feature histograms for groups.
