@@ -181,7 +181,7 @@ tifffile = ">=2019.7.2"
 
 [[package]]
 name = "dask"
-version = "2021.9.0"
+version = "2021.9.1"
 description = "Parallel PyData with Task Scheduling"
 category = "main"
 optional = false
@@ -198,10 +198,10 @@ toolz = ">=0.8.2"
 
 [package.extras]
 array = ["numpy (>=1.18)"]
-complete = ["bokeh (>=1.0.0,!=2.0.0)", "distributed (==2021.09.0)", "jinja2", "numpy (>=1.18)", "pandas (>=1.0)"]
+complete = ["bokeh (>=1.0.0,!=2.0.0)", "distributed (==2021.09.1)", "jinja2", "numpy (>=1.18)", "pandas (>=1.0)"]
 dataframe = ["numpy (>=1.18)", "pandas (>=1.0)"]
 diagnostics = ["bokeh (>=1.0.0,!=2.0.0)", "jinja2"]
-distributed = ["distributed (==2021.09.0)"]
+distributed = ["distributed (==2021.09.1)"]
 test = ["pytest", "pytest-rerunfailures", "pytest-xdist"]
 
 [[package]]
@@ -1953,8 +1953,8 @@ czifile = [
     {file = "czifile-2019.7.2.tar.gz", hash = "sha256:04c0e6bed3b24d1bf42bc2cf899a5a08986641379305ce88600fd1c710486436"},
 ]
 dask = [
-    {file = "dask-2021.9.0-py3-none-any.whl", hash = "sha256:cf557bfd8f0086270ca3f6b344d945e4a8061f118a7c5b7b0c2e4b56f6c419c4"},
-    {file = "dask-2021.9.0.tar.gz", hash = "sha256:7c1ed5069fd81925130db7a7c94037eb8259fb3599adb4d130748aa3966e5684"},
+    {file = "dask-2021.9.1-py3-none-any.whl", hash = "sha256:816beb22d6b3f71d5bbc68ed374b53fb47feee871399dbf0e41f456092f44e62"},
+    {file = "dask-2021.9.1.tar.gz", hash = "sha256:e11f2bf2cac809e5408fc107dcf727af3bc3472160f206cb4b828211396ad65c"},
 ]
 debugpy = [
     {file = "debugpy-1.4.1-cp27-cp27m-macosx_10_14_x86_64.whl", hash = "sha256:a2c5a1c49239707ed5bc8e97d8f9252fb392d9e13c79c7b477593d7dde4ae24a"},
@@ -2056,6 +2056,8 @@ idna = [
     {file = "idna-3.2.tar.gz", hash = "sha256:467fbad99067910785144ce333826c71fb0e63a425657295239737f7ecd125f3"},
 ]
 imagecodecs = [
+    {file = "imagecodecs-2021.8.26-cp310-cp310-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:6f7b636c55d1d91723b0f7eb753a92c753404e3fa9a3cbd79968a750c2e28079"},
+    {file = "imagecodecs-2021.8.26-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:6df92c5c6d7fa816f9e4b574db56883ca442d086ecd905bb3c8aefd3990e9a0b"},
     {file = "imagecodecs-2021.8.26-cp310-cp310-win32.whl", hash = "sha256:b884633e5b987e02db12c51ae39c50fcc53856e5eff59fa88d2240063084301a"},
     {file = "imagecodecs-2021.8.26-cp310-cp310-win_amd64.whl", hash = "sha256:567c480e437fd8f4e737d81abdf407f49a976a681a4493bc025f4e6578e3a882"},
     {file = "imagecodecs-2021.8.26-cp37-cp37m-macosx_10_9_x86_64.whl", hash = "sha256:96f6a084e48274d94fb69a51d3cf19db6329d8ed5c2005695613a876145ec28b"},
@@ -2629,6 +2631,10 @@ pyqt5-qt5 = [
     {file = "PyQt5_Qt5-5.15.2-py3-none-win_amd64.whl", hash = "sha256:750b78e4dba6bdf1607febedc08738e318ea09e9b10aea9ff0d73073f11f6962"},
 ]
 pyqt5-sip = [
+    {file = "PyQt5_sip-12.9.0-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:6d5bca2fc222d58e8093ee8a81a6e3437067bb22bc3f86d06ec8be721e15e90a"},
+    {file = "PyQt5_sip-12.9.0-cp310-cp310-manylinux1_x86_64.whl", hash = "sha256:d59af63120d1475b2bf94fe8062610720a9be1e8940ea146c7f42bb449d49067"},
+    {file = "PyQt5_sip-12.9.0-cp310-cp310-win32.whl", hash = "sha256:0fc9aefacf502696710b36cdc9fa2a61487f55ee883dbcf2c2a6477e261546f7"},
+    {file = "PyQt5_sip-12.9.0-cp310-cp310-win_amd64.whl", hash = "sha256:485972daff2fb0311013f471998f8ec8262ea381bded244f9d14edaad5f54271"},
     {file = "PyQt5_sip-12.9.0-cp36-cp36m-macosx_10_6_intel.whl", hash = "sha256:d85002238b5180bce4b245c13d6face848faa1a7a9e5c6e292025004f2fd619a"},
     {file = "PyQt5_sip-12.9.0-cp36-cp36m-manylinux1_x86_64.whl", hash = "sha256:83c3220b1ca36eb8623ba2eb3766637b19eb0ce9f42336ad8253656d32750c0a"},
     {file = "PyQt5_sip-12.9.0-cp36-cp36m-win32.whl", hash = "sha256:d8b2bdff7bbf45bc975c113a03b14fd669dc0c73e1327f02706666a7dd51a197"},
