@@ -5,6 +5,7 @@ import napari
 import numpy as np
 import roifile
 import tifffile
+from skimage import img_as_float
 from skimage.measure import regionprops, label
 from skimage.segmentation import watershed
 
@@ -103,6 +104,7 @@ def manual_postprocess(SOMA_SELECTED_DIR, reconstructed_seg=None):
                     parent = import_confocal_image(parent_path)
                     reconstructed_seg = np.zeros(parent.shape)
 
+                print(roi_path)
                 minz, miny, minx, maxz, maxy, maxx = metadata['bounds']
                 linebuilder = _load_ROI(roi_path)
                 X, Y = _unwrap_polygon(linebuilder)
@@ -119,5 +121,7 @@ def manual_postprocess(SOMA_SELECTED_DIR, reconstructed_seg=None):
                     somas_est.extend(somas_coords)
             except Exception as e:
                 print(e)
+
+    reconstructed_seg = (reconstructed_seg - reconstructed_seg.min()) / (reconstructed_seg.max() - reconstructed_seg.min())
 
     return reconstructed_seg, parent_path, roi_path, np.array(somas_est)

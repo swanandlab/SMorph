@@ -70,9 +70,9 @@ def _draw_ROI(denoised, name):
     return linebuilder
 
 
-def mask_ROI(original, denoised, linebuilder):
+def mask_ROI(im, linebuilder):
     # Create a binary image (mask) from ROI object.
-    y, x = np.mgrid[:original.shape[1], :original.shape[2]]
+    y, x = np.mgrid[:im.shape[1], :im.shape[2]]
     if type(linebuilder) != np.ndarray:
         poly_path = Path(list(zip(linebuilder.xs, linebuilder.ys)))
         X, Y = linebuilder.xs, linebuilder.ys
@@ -85,15 +85,13 @@ def mask_ROI(original, denoised, linebuilder):
     coords = np.hstack((x.reshape(-1, 1), y.reshape(-1, 1)))
 
     mask = poly_path.contains_points(coords)
-    mask = mask.reshape(original.shape[1], original.shape[2])
+    mask = mask.reshape(im.shape[1], im.shape[2])
 
-    out1, out2 = np.empty(original.shape), np.empty(original.shape)
-    for i in range(original.shape[0]):
-        out1[i] = original[i] * mask
-        out2[i] = denoised[i] * mask
+    out = np.empty(im.shape)
+    for i in range(im.shape[0]):
+        out[i] = im[i] * mask
 
     # reduce non-empty
-    original_masked = out1[:, min_y: max_y, min_x:max_x]
-    denoised_masked = out2[:, min_y: max_y, min_x:max_x]
+    im_masked = out[:, min_y: max_y, min_x:max_x]
 
-    return original_masked, denoised_masked
+    return im_masked

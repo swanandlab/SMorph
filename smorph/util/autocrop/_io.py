@@ -46,6 +46,7 @@ def import_confocal_image(img_path, channel_interest=0):
             img = img[channel_interest]
 
     img = img_as_float(img)
+    img = (img - img.min()) / (img.max() - img.min())
     return img
 
 
@@ -176,11 +177,11 @@ def export_cells(
         cell_metadata['roi_path'] = path.abspath(roi_path)
 
     for (obj, region) in enumerate(regions):
-        if region.area > hi_vol_cutoff:  # for postprocessing
-            minz, miny, minx, maxz, maxy, maxx = region.bbox
+        if region['vol'] > hi_vol_cutoff:  # for postprocessing
+            minz, miny, minx, maxz, maxy, maxx = region['bbox']
             segmented = tissue_img[minz:maxz, miny:maxy, minx:maxx].copy()
             segmented = img_as_ubyte(segmented)
-            segmented[~region.filled_image] = 0
+            segmented[~region['image']] = 0
 
             try:
                 markers = _get_blobs(segmented, 'confocal').astype(int)[:, :-1]
@@ -191,7 +192,7 @@ def export_cells(
             name = str(uuid.uuid4().hex)
             out_name = f'{OUT_DIR}/'+name
 
-            cell_metadata['bounds'] = region.bbox
+            cell_metadata['bounds'] = region['bbox']
             out_metadata = json.dumps(cell_metadata)
 
             tifffile.imsave(
@@ -207,20 +208,20 @@ def export_cells(
                 software='Autocrop'
             )
             roi.tofile(out_name + '.roi')
-        if low_vol_cutoff <= region.area <= hi_vol_cutoff:
-            minz, miny, minx, maxz, maxy, maxx = region.bbox
+        if low_vol_cutoff <= region['vol'] <= hi_vol_cutoff:
+            minz, miny, minx, maxz, maxy, maxx = region['bbox']
             name = str(uuid.uuid4().hex) + '.tif'
 
             # Cell-specific metadata
-            cell_metadata['bounds'] = region.bbox
-            cell_metadata['cell_volume'] = int(region.filled_area)
-            cell_metadata['centroid'] = region.centroid
-            cell_metadata['territorial_volume'] = int(region.convex_area)
+            cell_metadata['bounds'] = region['bbox']
+            cell_metadata['cell_volume'] = int(region['vol'])
+            cell_metadata['centroid'] = region['centroid']
+            # cell_metadata['territorial_volume'] = int(region.convex_area)
             out_metadata = json.dumps(cell_metadata)
 
             if seg_type == SEG_TYPES[0] or seg_type == SEG_TYPES[2]:
                 segmented = tissue_img[minz:maxz, miny:maxy, minx:maxx].copy()
-                segmented[~region.filled_image] = 0
+                segmented[~region['image']] = 0
                 segmented = segmented / segmented.max()  # contrast stretch
                 segmented = img_as_ubyte(segmented)
 
@@ -286,10 +287,10 @@ def export_cells(
         RES_DIR = OUT_DIR + 'residue'
         _mkdir_if_not(RES_DIR)
         for (obj, region) in enumerate(residue_regions):
-            if low_vol_cutoff <= region.area:  # for postprocessing
-                minz, miny, minx, maxz, maxy, maxx = region.bbox
+            if low_vol_cutoff <= region['vol']:  # for postprocessing
+                minz, miny, minx, maxz, maxy, maxx = region['bbox']
                 segmented = tissue_img[minz:maxz, miny:maxy, minx:maxx].copy()
-                segmented[~region.filled_image] = 0
+                segmented[~region['image']] = 0
                 segmented = segmented / segmented.max()  # contrast stretch
                 segmented = img_as_ubyte(segmented)
 
@@ -304,7 +305,7 @@ def export_cells(
                 name = str(uuid.uuid4().hex)
                 out_name = f'{RES_DIR}/'+name
 
-                cell_metadata['bounds'] = region.bbox
+                cell_metadata['bounds'] = region['bbox']
                 out_metadata = json.dumps(cell_metadata)
 
                 tifffile.imsave(

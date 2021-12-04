@@ -7,5 +7,5 @@ FOR %%I IN (%*) DO (
         ECHO "%%~fI"
     )
 )
-python "%~dp0/cell_viewer.py" %*
+poetry run python "%~dp0/cell_viewer.py" %*
 pause

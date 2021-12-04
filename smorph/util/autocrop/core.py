@@ -7,6 +7,7 @@ import skimage
 from matplotlib import gridspec
 from psutil import virtual_memory
 from scipy.spatial import ConvexHull
+from scipy.ndimage import find_objects
 from skimage.draw import polygon2mask
 from skimage.filters import apply_hysteresis_threshold, sobel
 from skimage.measure import label, regionprops
@@ -16,6 +17,34 @@ from skimage.restoration import (calibrate_denoiser, denoise_nl_means,
 from skimage.segmentation import clear_border
 from skimage.util import unique_rows
 
+
+def _testThresholds(  #TODO: redundant
+    im,
+    low_thresh=.06,
+    high_thresh=.45,
+    low_delta=.01,
+    high_delta=.05,
+    n=1
+):
+    n_labels = 2 * n + 1
+    low_thresh -= low_delta * n
+    high_thresh -= high_delta * n
+    out = []
+    for i in range(n_labels):
+        thresholded = threshold(im, low_thresh + i * low_delta,
+                                high_thresh + i * high_delta)
+        labels = label_thresholded(thresholded)
+        filtered_regions = arrange_regions(labels)
+        labels = np.zeros_like(thresholded, dtype=int)
+        reg_itr = 1
+        for region in filtered_regions:
+            minz, miny, minx, maxz, maxy, maxx = region['bbox']
+            labels[minz:maxz, miny:maxy, minx:maxx] += region['image'] * reg_itr
+            reg_itr += 1
+        out.append({'data': labels,
+                    'name': (f'L:{low_thresh + i * low_delta:.3f}, '
+                             f'H:{high_thresh + i * high_delta:.3f}')})
+    return out
 
 def testThresholds(
     edge_filtered,
@@ -40,8 +69,8 @@ def testThresholds(
         labels = np.zeros_like(thresholded, dtype=int)
         reg_itr = 1
         for region in filtered_regions:
-            minz, miny, minx, maxz, maxy, maxx = region.bbox
-            labels[minz:maxz, miny:maxy, minx:maxx] += region.filled_image * reg_itr
+            minz, miny, minx, maxz, maxy, maxx = region['bbox']
+            labels[minz:maxz, miny:maxy, minx:maxx] += region['image'] * reg_itr
             reg_itr += 1
 
         curr_ax = axes if N_COLS == 1 else axes[i]
@@ -180,7 +209,7 @@ def deconvolve(img, impath, iters=8):
 
         selected_detector = None
         for i in metadata['Experiment']['ExperimentBlocks']['AcquisitionBlock'
-            ]['MultiTrackSetup']['TrackSetup']['Detectors']['Detector']: # [0]['Detectors']['Detector']:
+            ]['MultiTrackSetup']['TrackSetup']['Detectors']['Detector']:  # [channel]['Detectors']['Detector']:
             if i['PinholeDiameter'] > 0:
                 selected_detector = i
         pinhole_radius = selected_detector['PinholeDiameter'] / 2 * 1e6
@@ -204,6 +233,7 @@ def deconvolve(img, impath, iters=8):
         impsf = obsvol.volume()
 
         img = skimage.restoration.richardson_lucy(img, impsf, iterations=iters)
+        img = (img - img.min()) / (img.max() - img.min())
 
     return img
 
@@ -332,7 +362,7 @@ def filter_labels(labels, thresholded, polygon=None, conservative=True):
 def _filter_small_objects(regions, cutoff_volume=64):
     idx = 0
     for region in regions:
-        if region.area > cutoff_volume:
+        if region['vol'] > cutoff_volume:
             break
         idx += 1
     filtered = regions[idx:]
@@ -340,8 +370,27 @@ def _filter_small_objects(regions, cutoff_volume=64):
 
 
 def arrange_regions(filtered_labels):
-    regions = sorted(regionprops(filtered_labels),
-                     key=lambda region: region.area)
+    objects = find_objects(filtered_labels)
+    ndim = filtered_labels.ndim
+
+    regions = []
+    for itr, slice in enumerate(objects):
+        if slice is None:
+            continue
+        label = itr + 1
+        template = dict(image=None, bbox=None, centroid=None, vol=None)
+        template['image'] = (filtered_labels[slice] == label)
+        template['bbox'] = tuple([slice[i].start for i in range(ndim)] +
+                                 [slice[i].stop for i in range(ndim)])
+        indices = np.nonzero(template['image'])
+        coords = np.vstack([indices[i] + slice[i].start
+                            for i in range(ndim)]).T
+        template['centroid'] = tuple(coords.mean(axis=0))
+        template['vol'] = np.sum(template['image'])
+        regions.append(template)
+
+    regions = sorted(regions,
+                     key=lambda region: region['vol'])
     regions = _filter_small_objects(regions)
     return regions
 
@@ -356,12 +405,12 @@ def paginate_objs(regions, pg_size=50):
 
 
 def extract_obj(region, tissue_img):
-    minz, miny, minx, maxz, maxy, maxx = region.bbox
+    minz, miny, minx, maxz, maxy, maxx = region['bbox']
 
     extracted_obj = tissue_img[minz:maxz, miny:maxy, minx:maxx].copy()
-    extracted_obj[~region.filled_image] = 0.0
+    extracted_obj[~region['image']] = 0.0
 
-    print(f'Volume of this object is: {region.area}')
+    print(f'Volume of this object is: {region["vol"]}')
     return extracted_obj
 
 
@@ -378,13 +427,13 @@ def project_batch(BATCH_NO, N_BATCHES, regions, tissue_img):
     idx = 0
     l_obj = BATCH_NO * 50
     for obj in range(l_obj, min(50 + l_obj, N_OBJECTS)):
-        minz, miny, minx, maxz, maxy, maxx = regions[obj].bbox
+        minz, miny, minx, maxz, maxy, maxx = regions[obj]['bbox']
         ax.append(fig.add_subplot(rows, columns, idx+1))
         idx += 1
-        ax[-1].set_title(f'Obj {obj}; Vol: {regions[obj].area}')
+        ax[-1].set_title(f'Obj {obj}; Vol: {regions[obj]["vol"]}')
         ax[-1].axis('off')
 
         extracted_cell = tissue_img[minz:maxz, miny:maxy, minx:maxx].copy()
-        extracted_cell[~regions[obj].filled_image] = 0.0
+        extracted_cell[~regions[obj]['image']] = 0.0
 
         plt.imshow(np.max(extracted_cell, 0), cmap='gray')
