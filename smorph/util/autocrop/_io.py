@@ -8,26 +8,13 @@ import numpy as np
 import roifile
 import skimage.io as io
 import tifffile
-from skimage import img_as_float, img_as_ubyte
+from skimage import img_as_float, img_as_ubyte, exposure
 
 from .core import _unwrap_polygon
 from ...analysis._skeletal import _get_blobs
 
 
-def import_confocal_image(img_path, channel_interest=0):
-    """Loads the 3D confocal image.
-
-    - Tested on: CZI, LSM, TIFF
-
-    Parameters
-    ----------
-    img_path : str
-        Path to the confocal tissue image.
-    channel_interest : int
-        Channel of interest containing image data to be processed,
-        by default 0
-
-    """
+def _import_confocal_image(img_path, channel_interest=0):
     # image has to be converted to float for processing
     if img_path.split('.')[-1] == 'czi':
         img = czifile.imread(img_path)
@@ -47,6 +34,33 @@ def import_confocal_image(img_path, channel_interest=0):
 
     img = img_as_float(img)
     img = (img - img.min()) / (img.max() - img.min())
+    return img
+
+
+def import_confocal_image(img_path, ref_path=None, channel_interest=0):
+    """Loads the 3D confocal image.
+
+    - Tested on: CZI, LSM, TIFF
+
+    Parameters
+    ----------
+    img_path : str
+        Path to the confocal tissue image.
+    ref_path : str
+        Path to the reference image to whole exposure level
+        `img_path` would be standardized.
+    channel_interest : int
+        Channel of interest containing image data to be processed,
+        by default 0
+
+    """
+    # image has to be converted to float for processing
+    img = _import_confocal_image(img_path, channel_interest)
+
+    if ref_path is not None:
+        ref_img = _import_confocal_image(ref_path, channel_interest)
+        img = exposure.match_histograms(img, ref_img)
+
     return img
 
 

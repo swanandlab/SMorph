@@ -175,7 +175,7 @@ def denoise(img, denoise_parameters):
     return denoised
 
 
-def deconvolve(img, impath, iters=8):
+def deconvolve(img, impath, iters=8, pinhole_shape='round'):
     """Do in-place deconvolution.
 
     Parameters
@@ -186,6 +186,9 @@ def deconvolve(img, impath, iters=8):
         Path to the original image file.
     iters : int, optional
         Number of iterations for deconvolution, by default 8
+    pinhole_shape : str, optional
+        Shape of the pinhole of the confocal microscope. Either 'round' or
+        'square', by default 'round'
 
     Returns
     -------
@@ -227,7 +230,7 @@ def deconvolve(img, impath, iters=8):
             num_aperture=num_aperture,
             refr_index=refr_index,
             pinhole_radius=pinhole_radius,  # microns
-            pinhole_shape='square'
+            pinhole_shape=pinhole_shape
         )
         obsvol = psf.PSF(psf.ISOTROPIC | psf.CONFOCAL, **args)
         impsf = obsvol.volume()
