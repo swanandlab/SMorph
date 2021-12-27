@@ -1,4 +1,5 @@
 import json
+from re import I
 import uuid
 from os import getcwd, mkdir, path
 from shutil import rmtree
@@ -10,11 +11,11 @@ import skimage.io as io
 import tifffile
 from skimage import img_as_float, img_as_ubyte, exposure
 
-from .core import _unwrap_polygon
+from .util import _unwrap_polygon
 from ...analysis._skeletal import _get_blobs
 
 
-def _import_confocal_image(img_path, channel_interest=0):
+def _import_image(img_path, channel_interest=0):
     # image has to be converted to float for processing
     if img_path.split('.')[-1] == 'czi':
         img = czifile.imread(img_path)
@@ -37,8 +38,8 @@ def _import_confocal_image(img_path, channel_interest=0):
     return img
 
 
-def import_confocal_image(img_path, ref_path=None, channel_interest=0):
-    """Loads the 3D confocal image.
+def imread(img_path, ref_path=None, channel_interest=0):
+    """Loads the image.
 
     - Tested on: CZI, LSM, TIFF
 
@@ -55,10 +56,12 @@ def import_confocal_image(img_path, ref_path=None, channel_interest=0):
 
     """
     # image has to be converted to float for processing
-    img = _import_confocal_image(img_path, channel_interest)
+    img = _import_image(img_path, channel_interest)
+
+    img = img if img.ndim == 3 else np.expand_dims(img, 0)
 
     if ref_path is not None:
-        ref_img = _import_confocal_image(ref_path, channel_interest)
+        ref_img = _import_image(ref_path, channel_interest)
         img = exposure.match_histograms(img, ref_img)
 
     return img

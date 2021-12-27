@@ -9,7 +9,7 @@ from skimage import img_as_float
 from skimage.measure import regionprops, label
 from skimage.segmentation import watershed
 
-from ._io import import_confocal_image, export_cells
+from ._io import imread, export_cells
 from ._roi_extract import _load_ROI
 from .core import _unwrap_polygon
 
@@ -101,7 +101,7 @@ def manual_postprocess(SOMA_SELECTED_DIR, reconstructed_seg=None):
                 roi_path = metadata['roi_path']
 
                 if reconstructed_seg is None:
-                    parent = import_confocal_image(parent_path)
+                    parent = imread(parent_path)
                     reconstructed_seg = np.zeros(parent.shape)
 
                 print(roi_path)

@@ -1,16 +1,21 @@
 from .core import (
     testThresholds,
     projectXYZ,
-    calibrate_nlm_denoiser,
-    denoise,
-    deconvolve,
     threshold,
     label_thresholded,
     filter_labels,
+    approximate_somas,
     arrange_regions,
     paginate_objs,
     extract_obj,
     project_batch,
+    TissueImage,
+)
+
+from ._preprocess import (
+    calibrate_nlm_denoiser,
+    denoise,
+    deconvolve,
 )
 
 from ._roi_extract import (
@@ -19,11 +24,15 @@ from ._roi_extract import (
 )
 
 from ._io import (
-    import_confocal_image,
+    imread,
     export_cells
 )
 
 from ._postprocessing import (
     postprocess_segment,
     manual_postprocess
+)
+
+from ._max_rect_in_poly import (
+    get_maximal_rectangle,
 )
