@@ -1,4 +1,6 @@
+import json
 from os import (
+    getcwd,
     listdir,
     path,
 )
@@ -44,7 +46,10 @@ from skimage.util import unique_rows
 from scipy import ndimage as ndi
 from vispy.geometry.rect import Rect
 
-from ._io import imread
+from ._io import (
+    imread,
+    export_cells,
+)
 from ._max_rect_in_poly import (
     get_maximal_rectangle,
 )
@@ -482,7 +487,8 @@ class TissueImage:
                  'imdenoised', 'refdenoised', 'imsegmented', 'labels',
                  'regions', 'in_box', 'roi_polygon', 'low_volume_cutoff', 'region_inclusivity', 'REGION_INCLUSIVITY_LABELS',
                  'somas_estimates', 'DECONV_ITR', 'CLIP_LIMIT', 'SCALE', 'ROI_PATH', 'ROI_NAME', 'cache_dir',
-                 'ALL_PT_ESTIMATES', 'FINAL_PT_ESTIMATES', 'residue', 'n_region', 'OBJ_INDEX', 'extracted_cell', 'reconstructed_labels')
+                 'ALL_PT_ESTIMATES', 'FINAL_PT_ESTIMATES', 'residue', 'n_region', 'OBJ_INDEX', 'reconstructed_labels',
+                 'LOW_VOLUME_CUTOFF', 'HIGH_VOLUME_CUTOFF', 'OUTPUT_OPTION', 'SEGMENT_TYPE')
 
     def __init__(
         self,
@@ -772,7 +778,6 @@ class TissueImage:
         """."""
         somas_estimates = approximate_somas(self.imsegmented, self.regions, src=src)
         self.somas_estimates = somas_estimates
-        return somas_estimates
 
     def separate_clumps(
         self,
@@ -1008,18 +1013,19 @@ class TissueImage:
         def save_watershed():
             layer_names = [layer.name for layer in viewer.layers]
             viewer.layers.remove('watershed_results')
-            regions = sorted(self.regions, key=lambda region: region['vol'])
+            self.regions = sorted(self.regions, key=lambda region: region['vol'])
+            regions = self.regions
             watershed_results = np.zeros(self.imdenoised.shape, dtype=int)
             for itr in range(len(regions)):
                 minz, miny, minx, maxz, maxy, maxx = regions[itr]['bbox']
                 watershed_results[minz:maxz, miny:maxy, minx:maxx] += regions[itr]['image'] * (itr + 1)
-            print('shit2')
+
             if 'reconstructed_labels' in layer_names:
                 viewer.layers[layer_names.index('reconstructed_labels')].data = watershed_results
 
             # After all changes (for reproducibility)
             final_soma = np.unique(viewer.layers[layer_names.index('filtered_coords')].data, axis=0)
-            print('shit3')
+
             # discarded clump ROI: to be subtracted: np.setdiff1d(somas_estimates, final_soma)
             ALL_PT_ESTIMATES, FINAL_PT_ESTIMATES = self.somas_estimates.copy(), final_soma
             self.ALL_PT_ESTIMATES = ALL_PT_ESTIMATES
@@ -1040,6 +1046,10 @@ class TissueImage:
         if seed_src is not None:
             final_pts = np.load(seed_src, allow_pickle=True)[1].astype(int)
             viewer.add_points(final_pts, face_color='red', edge_width=0,
+                              opacity=.6, size=5, name='filtered_coords',
+                              scale=SCALE)
+        elif self.FINAL_PT_ESTIMATES is not None:
+            viewer.add_points(self.FINAL_PT_ESTIMATES, face_color='red', edge_width=0,
                               opacity=.6, size=5, name='filtered_coords',
                               scale=SCALE)
 
@@ -1074,101 +1084,186 @@ class TissueImage:
         denoised = self.imdenoised
         regions = self.regions
         segmented = self.imsegmented
-        SCALE = self.SCALE
-        self.n_region = 0
 
-        on_colab = False
+        def plot_batch(BATCH_NO):
+            project_batch(BATCH_NO, N_BATCHES, regions, denoised)
+            plt.show()
+
+        self.OBJ_INDEX = 0
+        extracted_cell = None
+        # minz, miny, minx, maxz, maxy, maxx = 0, 0, 0, 0, 0, 0
+
+        def plot_single(obj_index):
+            self.OBJ_INDEX = obj_index
+            extracted_cell = extract_obj(regions[obj_index], segmented)
+            # minz, miny, minx, maxz, maxy, maxx = regions[obj_index]['bbox']
+            projectXYZ(extracted_cell, .5, .5, 1)
 
         if view == 'grid':
             # Set `BATCH_NO` to view detected objects in paginated 2D MIP views.
             N_BATCHES = paginate_objs(regions, grid_size)
+            widgets.interact(plot_batch, BATCH_NO=widgets.IntSlider(min=0,
+                max=N_BATCHES-1, layout=widgets.Layout(width='100%')))
+        else:
+            widgets.interact(plot_single,
+                obj_index=widgets.IntSlider(min=0, max=len(regions)-1,
+                layout=widgets.Layout(width='100%')))
+    
+    def refine_soma_approx(self):
+        self.n_region = 0
+        denoised = self.imdenoised
+        regions = self.regions
+        SCALE = self.SCALE
 
-            def plot_batch(BATCH_NO):
-                project_batch(BATCH_NO, N_BATCHES, regions, denoised)
-                plt.show()
+        viewer = napari.Viewer(ndisplay=3)
 
-            _ = widgets.interact(plot_batch, BATCH_NO=widgets.IntSlider(min=0,
-                                max=N_BATCHES-1, layout=widgets.Layout(width='100%')))
-        elif view == 'single':
-            self.OBJ_INDEX = 0
-            extracted_cell = None
-            minz, miny, minx, maxz, maxy, maxx = 0, 0, 0, 0, 0, 0
+        @magicgui(
+            auto_call=True,
+            selected_region={'maximum': len(regions)-1}
+        )
+        def view_single_region(selected_region=0):
+            self.n_region = selected_region
+            somas_estimates = self.FINAL_PT_ESTIMATES
+            minz, miny, minx, maxz, maxy, maxx = regions[selected_region]['bbox']
+            extracted_cell = denoised[minz:maxz, miny:maxy, minx:maxx]*regions[selected_region]['image']
+            ll = np.array([minz, miny, minx])
+            ur = np.array([maxz, maxy, maxx]) - 1  # upper-right
+            inidx = np.all(np.logical_and(ll <= somas_estimates, somas_estimates <= ur), axis=1)
+            somas_coords = np.array(somas_estimates)[inidx]
+            somas_coords -= ll
+            somas_coords = np.array([x for x in somas_coords if regions[self.n_region]['image'][tuple(x.astype(np.int64))] > 0])
+            labels = label(regions[self.n_region]['image'])
+            areg = []
+            for coord in somas_coords:
+                areg.append(labels[tuple(coord.astype(np.int64))])
+            visited = []
+            filtered_coords = []
+            for i in range(len(areg)):
+                if areg[i] not in visited:
+                    filtered_coords.append(somas_coords[i])
+                    visited.append(areg[i])
+            filtered_coords = np.array(filtered_coords)
 
-            def plot_single(obj_index):
-                self.OBJ_INDEX = obj_index
-                self.extracted_cell = extract_obj(regions[function], segmented)
-                # minz, miny, minx, maxz, maxy, maxx = regions[function]['bbox']
-                projectXYZ(extracted_cell, .5, .5, 1)
-
-            if on_colab:
-                _ = widgets.interact(plot_single, obj_index=widgets.IntSlider(min=0,
-                                     max=len(regions)-1,
-                                     layout=widgets.Layout(width='100%')))
+            if len(viewer.layers) == 0:
+                viewer.add_image(denoised[minz:maxz, miny:maxy, minx:maxx], name='denoised', colormap='red', scale=SCALE)
+                viewer.add_image(denoised[minz:maxz, miny:maxy, minx:maxx]*regions[selected_region]['image'], name='segmented', colormap='red', scale=SCALE)
+                viewer.add_points(filtered_coords, face_color='lime', edge_width=0,
+                                  opacity=.6, size=5, name='filtered_coords', scale=SCALE)
             else:
-                viewer = napari.Viewer(ndisplay=3)
+                viewer.layers[0].data = denoised[minz:maxz, miny:maxy, minx:maxx]
+                viewer.layers[1].data = extracted_cell
+                viewer.layers[2].data = filtered_coords
+            viewer.camera.center = ((maxz-minz)//2, (maxy-miny)//2, (maxx-minx)//2)
 
-                @magicgui(
-                    auto_call=True,
-                    selected_region={'maximum': len(regions)-1}
-                )
-                def view_single_region(selected_region=0):
-                    self.n_region = selected_region
-                    somas_estimates = self.FINAL_PT_ESTIMATES
-                    minz, miny, minx, maxz, maxy, maxx = regions[selected_region]['bbox']
-                    extracted_cell = denoised[minz:maxz, miny:maxy, minx:maxx]*regions[selected_region]['image']
-                    ll = np.array([minz, miny, minx])
-                    ur = np.array([maxz, maxy, maxx]) - 1  # upper-right
-                    inidx = np.all(np.logical_and(ll <= somas_estimates, somas_estimates <= ur), axis=1)
-                    somas_coords = np.array(somas_estimates)[inidx]
-                    somas_coords -= ll
-                    somas_coords = np.array([x for x in somas_coords if regions[self.n_region]['image'][tuple(x.astype(np.int64))] > 0])
-                    labels = label(regions[self.n_region]['image'])
-                    areg = []
-                    for coord in somas_coords:
-                        areg.append(labels[tuple(coord.astype(np.int64))])
-                    visited = []
-                    filtered_coords = []
-                    for i in range(len(areg)):
-                        if areg[i] not in visited:
-                            filtered_coords.append(somas_coords[i])
-                            visited.append(areg[i])
-                    filtered_coords = np.array(filtered_coords)
+        @magicgui(
+            call_button="Update soma estimates"
+        )
+        def update_soma_estimates():
+            FINAL_PT_ESTIMATES = self.FINAL_PT_ESTIMATES
+            layer_names = [layer.name for layer in viewer.layers]
+            region = regions[self.n_region]
+            minz, miny, minx, maxz, maxy, maxx = region['bbox']
+            ll = np.array([minz, miny, minx])
+            somas_coords = viewer.layers[layer_names.index('filtered_coords')].data.astype(int)
+            im = denoised[minz:maxz, miny:maxy, minx:maxx].copy()
+            im[~region['image']] = 0
+            markers = np.zeros(region['image'].shape)
 
-                    if len(viewer.layers) == 0:
-                        viewer.add_image(denoised[minz:maxz, miny:maxy, minx:maxx], name='denoised', colormap='red', scale=SCALE)
-                        viewer.add_image(denoised[minz:maxz, miny:maxy, minx:maxx]*regions[selected_region]['image'], name='segmented', colormap='red', scale=SCALE)
-                        viewer.add_points(filtered_coords, face_color='lime', edge_width=0,
-                                            opacity=.6, size=5, name='filtered_coords', scale=SCALE)
-                    else:
-                        viewer.layers[0].data = denoised[minz:maxz, miny:maxy, minx:maxx]
-                        viewer.layers[1].data = extracted_cell
-                        viewer.layers[2].data = filtered_coords
-                    viewer.camera.center = ((maxz-minz)//2, (maxy-miny)//2, (maxx-minx)//2)
+            for i in range(somas_coords.shape[0]):
+                markers[tuple(somas_coords[i])] = i + 1
 
-                @magicgui(
-                    call_button="Update soma estimates"
-                )
-                def update_soma_estimates():
-                    FINAL_PT_ESTIMATES = self.FINAL_PT_ESTIMATES
-                    layer_names = [layer.name for layer in viewer.layers]
-                    region = regions[self.n_region]
+            labels = _segment_clump(im, markers)
+            viewer.add_labels(labels, rendering='translucent', opacity=.5, scale=SCALE)
+            FINAL_PT_ESTIMATES = np.vstack((FINAL_PT_ESTIMATES, somas_coords+ll))
+            FINAL_PT_ESTIMATES = np.unique(FINAL_PT_ESTIMATES, axis=0)
+            self.FINAL_PT_ESTIMATES = FINAL_PT_ESTIMATES
+
+        viewer.window.add_dock_widget(view_single_region, name='View individual region')
+        viewer.window._dock_widgets['View individual region'].setFixedHeight(70)
+        viewer.window.add_dock_widget(update_soma_estimates, name='Update soma estimates')
+        view_single_region()
+
+    def export_cropped(
+        self
+    ):
+        self.LOW_VOLUME_CUTOFF = self.regions[0]['vol']  # filter noise/artifacts
+        self.HIGH_VOLUME_CUTOFF = self.regions[-1]['vol']  # filter cell clusters
+        self.OUTPUT_OPTION = 'both'  # '3d' for 3D cells, 'mip' for Max Intensity Projections
+        self.SEGMENT_TYPE = 'both'
+        SCALE = self.SCALE
+        reconstructed_cells = None
+
+        viewer = napari.Viewer(ndisplay=3)
+        reconstructed_cells = np.zeros_like(self.imdenoised)
+        viewer.add_image(reconstructed_cells, colormap='inferno', scale=SCALE)
+        minz, miny, minx, maxz, maxy, maxx = self.regions[0]['bbox']
+
+        self.n_region = 0
+
+        vol_cutoff_slider = superqt.QLabeledRangeSlider()
+        vol_cutoff_slider.setRange(0, self.regions[-1]['vol'])
+        vol_cutoff_slider.setOrientation(1)
+        vol_cutoff_slider.setValue([self.LOW_VOLUME_CUTOFF, self.HIGH_VOLUME_CUTOFF])
+        vol_cutoff_slider.setEdgeLabelMode(superqt.sliders._labeled.EdgeLabelMode.NoLabel)
+        vol_cutoff_slider.setContentsMargins(25, 5, 25, 5)
+        for i in (0, 1):
+            # vol_cutoff_slider.children()[i].setAlignment(PyQt5.QtCore.Qt.AlignCenter)
+            vol_cutoff_slider.children()[i].setFixedWidth(len(str(int(self.regions[-1]['vol']))) * 20)
+
+        def vol_cutoff_update():
+            reconstructed_cells.fill(0)
+            self.LOW_VOLUME_CUTOFF, self.HIGH_VOLUME_CUTOFF = vol_cutoff_slider.value()
+            for region in self.regions:
+                if self.LOW_VOLUME_CUTOFF <= region['vol'] <= self.HIGH_VOLUME_CUTOFF:
                     minz, miny, minx, maxz, maxy, maxx = region['bbox']
-                    ll = np.array([minz, miny, minx])
-                    somas_coords = viewer.layers[layer_names.index('filtered_coords')].data.astype(int)
-                    im = denoised[minz:maxz, miny:maxy, minx:maxx].copy()
-                    im[~region['image']] = 0
-                    markers = np.zeros(region['image'].shape)
+                    segmented_cell = region['image'] * self.imdenoised[minz:maxz, miny:maxy, minx:maxx]
+                    segmented_cell = segmented_cell / (segmented_cell.max() - segmented_cell.min())
+                    reconstructed_cells[minz:maxz, miny:maxy, minx:maxx] += segmented_cell
+            minz, miny, minx, maxz, maxy, maxx = self.regions[n_region]['bbox']
+            viewer.layers[0].data = reconstructed_cells
 
-                    for i in range(somas_coords.shape[0]):
-                        markers[tuple(somas_coords[i])] = i + 1
+        vol_cutoff_slider.valueChanged.connect(vol_cutoff_update)
 
-                    labels = _segment_clump(im, markers)
-                    viewer.add_labels(labels, rendering='translucent', opacity=.5, scale=SCALE)
-                    FINAL_PT_ESTIMATES = np.vstack((FINAL_PT_ESTIMATES, somas_coords+ll))
-                    FINAL_PT_ESTIMATES = np.unique(FINAL_PT_ESTIMATES, axis=0)
-                    self.FINAL_PT_ESTIMATES = FINAL_PT_ESTIMATES
 
-                viewer.window.add_dock_widget(view_single_region, name='View individual region')
-                viewer.window._dock_widgets['View individual region'].setFixedHeight(70)
-                viewer.window.add_dock_widget(update_soma_estimates, name='Update soma estimates')
-                view_single_region()
+        @magicgui(
+            call_button='Export Cells',
+            output_option=dict(choices=['both', '3d', 'mip']),
+            segment_type=dict(choices=['both', 'segmented', 'unsegmented'])
+        )
+        def export(
+            output_option,
+            segment_type
+        ):
+            self.OUTPUT_OPTION, self.SEGMENT_TYPE = output_option, segment_type
+            self.imsegmented = reconstructed_cells
+            export_cells(self.im_path, self.LOW_VOLUME_CUTOFF,
+                         self.HIGH_VOLUME_CUTOFF, output_option, self.imdenoised,
+                         self.regions, None, segment_type, self.ROI_NAME, self.roi_polygon)
+
+            params = {
+                    'ref_impath': self.ref_impath,
+                    'CLIP_LIMIT': self.CLIP_LIMIT,
+                    'LOW_THRESH': self.LOW_THRESH,
+                    'HIGH_THRESH': self.HIGH_THRESH,
+                    'NAME_ROI': self.ROI_NAME,
+                    'PRE_LOW_VOLUME_CUTOFF': self.PRE_LOW_VOLUME_CUTOFF,
+                    'LOW_VOLUME_CUTOFF': self.LOW_VOLUME_CUTOFF,  # filter noise/artifacts
+                    'HIGH_VOLUME_CUTOFF': self.HIGH_VOLUME_CUTOFF,  # filter cell clusters
+                    'OUTPUT_TYPE': self.SEGMENT_TYPE
+            }
+
+            DIR = getcwd() + '/Autocropped/'
+            OUT_DIR = DIR + only_name(self.im_path) + \
+                    f'{"" if self.ROI_NAME == "" else "-" + str(self.ROI_NAME)}/'
+
+            with open(OUT_DIR + '.params.json', 'w') as out:
+                json.dump(params, out)
+
+            out = np.array([self.ALL_PT_ESTIMATES, self.FINAL_PT_ESTIMATES])
+            np.save(OUT_DIR + '.somas_estimates.npy', out)
+
+        viewer.window.add_dock_widget(vol_cutoff_slider, name='Volume Cutoff', area='bottom')
+
+        viewer.window._dock_widgets['Volume Cutoff'].setFixedHeight(80)
+        viewer.window.add_dock_widget(export, name='Export Cells')
+        vol_cutoff_update()
