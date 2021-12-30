@@ -1,8 +1,5 @@
-#installed windows sdk
-# !pip install cvxpy cvxopt
 import numpy as np
 import cvxpy
-# import cvxopt
 from shapely.geometry import Polygon
 
 
@@ -31,7 +28,7 @@ def _get_intersection(coords):
     inter_gj = {"geometry":
                 {"coordinates": [inter_coords],
                  "type": "Polygon"},
-                 "properties": {}, "type": "Feature"}
+                "properties": {}, "type": "Feature"}
 
     return inter_gj, inter_coords
 
@@ -78,7 +75,6 @@ def get_maximal_rectangle(coords):
     """
     _, coordinates = _get_intersection(coords)
     coordinates = np.array((list(coordinates)))
-    # coordinates = np.array(coordinates)
     x_range = np.max(coordinates, axis=0)[0]-np.min(coordinates, axis=0)[0]
     y_range = np.max(coordinates, axis=0)[1]-np.min(coordinates, axis=0)[1]
 
@@ -96,11 +92,8 @@ def get_maximal_rectangle(coords):
     br = cvxpy.Variable(2)
     tl = cvxpy.Variable(2)
     obj = cvxpy.Maximize(cvxpy.log(tr[0] - bl[0]) + cvxpy.log(tr[1] - bl[1]))
-    constraints = [bl[0] == tl[0],
-                   br[0] == tr[0],
-                   tl[1] == tr[1],
-                   bl[1] == br[1],
-                   ]
+    constraints = [bl[0] == tl[0], br[0] == tr[0],
+                   tl[1] == tr[1], bl[1] == br[1]]
 
     for i in range(len(B)):
         if inside_pt[0] * A1[i] + inside_pt[1] * A2[i] <= B[i]:
@@ -108,7 +101,6 @@ def get_maximal_rectangle(coords):
             constraints.append(tr[0] * A1[i] + tr[1] * A2[i] <= B[i])
             constraints.append(br[0] * A1[i] + br[1] * A2[i] <= B[i])
             constraints.append(tl[0] * A1[i] + tl[1] * A2[i] <= B[i])
-
         else:
             constraints.append(bl[0] * A1[i] + bl[1] * A2[i] >= B[i])
             constraints.append(tr[0] * A1[i] + tr[1] * A2[i] >= B[i])
@@ -116,8 +108,8 @@ def get_maximal_rectangle(coords):
             constraints.append(tl[0] * A1[i] + tl[1] * A2[i] >= B[i])
 
     prob = cvxpy.Problem(obj, constraints)
-    # ECOS, SCS, SCIPY
-    prob.solve(solver='SCS')#prob.solve(solver=cvxpy.SCIPY, verbose=False, max_iters=1000, reltol=1e-9)
+    # ECOS, CVXOPT, SCS, SCIPY
+    prob.solve(max_iters=1000, reltol=1e-9)
 
     bottom_left = np.array(bl.value).T * scale
     top_right = np.array(tr.value).T * scale

@@ -5,7 +5,7 @@ description = "A library for rapid analysis of the morphology of cells of the ne
 authors = ["Parul Sethi <parul1sethi@gmail.com>", "Kushaan Gupta <gkushaan@rediffmail.com>"]
 
 [tool.poetry.dependencies]
-python = "^3.7.11"
+python = "^3.7.8"
 jupyter = "^1.0.0"
 matplotlib = "^3.2.2"
 networkx = "^2.5"
@@ -27,9 +27,9 @@ uuid = "^1.30"
 ipympl = "^0.7.0"
 psf = "^2021.6.6"
 PyQt5 = "^5.15.4"
-cvxpy = "^1.1.17"
 cvxopt = "^1.2.7"
-RedLionfish = "^0.5"
+cvxpy-base = "^1.1.18"
+ecos = "^2.0.8"
 
 [tool.poetry.dev-dependencies]
 

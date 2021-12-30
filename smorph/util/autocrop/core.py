@@ -32,6 +32,13 @@ from skimage.filters import (
     apply_hysteresis_threshold,
     gaussian,
     sobel,
+    threshold_otsu,
+    threshold_isodata,
+    threshold_li,
+    threshold_mean,
+    threshold_minimum,
+    threshold_triangle,
+    threshold_yen,
 )
 from skimage.measure import label
 from skimage.morphology import (
@@ -141,19 +148,19 @@ def testThresholds(
     return out
 
 
-def projectXYZ(img, voxel_sz_x, voxel_sz_y, voxel_sz_z, cmap='gray'):
+def projectXYZ(img, voxel_sz_z, voxel_sz_y, voxel_sz_x, cmap='gray'):
     """Projects a 3D image in all planes.
 
     Parameters
     ----------
     img : ndarray
         Image data.
-    voxel_sz_x : int
-        Spacing of voxel in X axis.
-    voxel_sz_y : int
-        Spacing of voxel in Y axis.
     voxel_sz_z : int
         Spacing of voxel in Z axis.
+    voxel_sz_y : int
+        Spacing of voxel in Y axis.
+    voxel_sz_x : int
+        Spacing of voxel in X axis.
     cmap : str, optional
         Color map for displaying, by default 'gray'
 
@@ -483,12 +490,12 @@ class TissueImage:
         that contains it.
 
     """
-    __slots__ = ('im_path', 'imoriginal', 'imdeconvolved', 'impreprocessed',
+    __slots__ = ('im_path', 'ref_im_path', 'imoriginal', 'imdeconvolved', 'impreprocessed',
                  'imdenoised', 'refdenoised', 'imsegmented', 'labels',
-                 'regions', 'in_box', 'roi_polygon', 'low_volume_cutoff', 'region_inclusivity', 'REGION_INCLUSIVITY_LABELS',
-                 'somas_estimates', 'DECONV_ITR', 'CLIP_LIMIT', 'SCALE', 'ROI_PATH', 'ROI_NAME', 'cache_dir',
+                 'regions', 'in_box', 'roi_polygon', 'LOW_THRESH', 'HIGH_THRESH', 'LOW_AUTO_THRESH', 'HIGH_AUTO_THRESH', 'region_inclusivity', 'REGION_INCLUSIVITY_LABELS',
+                 'somas_estimates', 'DECONV_ITR', 'CLIP_LIMIT', 'SCALE', 'ROI_PATH', 'ROI_NAME', 'REF_ROI_PATH', 'CACHE_DIR',
                  'ALL_PT_ESTIMATES', 'FINAL_PT_ESTIMATES', 'residue', 'n_region', 'OBJ_INDEX', 'reconstructed_labels',
-                 'LOW_VOLUME_CUTOFF', 'HIGH_VOLUME_CUTOFF', 'OUTPUT_OPTION', 'SEGMENT_TYPE')
+                 'LOW_VOLUME_CUTOFF', 'HIGH_VOLUME_CUTOFF', 'OUT_DIMS', 'SEGMENT_TYPE')
 
     def __init__(
         self,
@@ -497,8 +504,8 @@ class TissueImage:
         roi_name=None,
         deconv_itr=30,
         clip_limit=.02,
-        ref_impath=None,
-        ref_roipath=None,
+        ref_im_path=None,
+        ref_roi_path=None,
         cache_dir='Cache',
     ):
         if not (
@@ -507,10 +514,12 @@ class TissueImage:
         ):
             raise ValueError('Load ROI properly')
         self.im_path = im_path
+        self.ref_im_path = ref_im_path
         self.imoriginal = imoriginal = imread(im_path)
         self.ROI_PATH = roi_path
+        self.REF_ROI_PATH = ref_roi_path
         self.ROI_NAME = roi_name
-        self.cache_dir = cache_dir
+        self.CACHE_DIR = cache_dir
         self.DECONV_ITR = deconv_itr
         self.CLIP_LIMIT = clip_limit
         self.labels = None
@@ -519,6 +528,7 @@ class TissueImage:
         self.in_box = None
         self.ALL_PT_ESTIMATES = None
         self.FINAL_PT_ESTIMATES = None
+        self.n_region = None
 
         cached_filename = only_name(im_path) + '.npy'
         cached = False
@@ -581,8 +591,8 @@ class TissueImage:
         self.impreprocessed = impreprocessed
 
         # Load reference
-        if ref_impath is not None:
-            imname = only_name(ref_impath)
+        if ref_im_path is not None:
+            imname = only_name(ref_im_path)
             REF_SUFFIX = f'-{roi_name}-ref.npy'
             try:
                 cached_filename = imname + REF_SUFFIX
@@ -599,7 +609,7 @@ class TissueImage:
                         raise ValueError('Preprocessed image not cached')
                 except:
                     cached = False
-                    refdeconvolved = deconvolve(imread(ref_impath), ref_impath, iters=deconv_itr)
+                    refdeconvolved = deconvolve(imread(ref_im_path), ref_im_path, iters=deconv_itr)
 
                 if cached:
                     refpreprocessed = refdeconvolved
@@ -608,12 +618,12 @@ class TissueImage:
                     refpreprocessed = equalize_adapthist(refdeconvolved-background, clip_limit=clip_limit)
 
 
-                SELECT_ROI = ref_roipath is not None
+                SELECT_ROI = ref_roi_path is not None
 
                 roi_polygon = (np.array([[0, 0], [refpreprocessed.shape[0]-1, 0],
                                          [refpreprocessed.shape[0]-1, refpreprocessed.shape[1]-1],
                                          [0, refpreprocessed.shape[1]-1]])
-                    if not SELECT_ROI else select_ROI(refpreprocessed, f'{imname}-{roi_name}', ref_roipath))
+                    if not SELECT_ROI else select_ROI(refpreprocessed, f'{imname}-{roi_name}', ref_roi_path))
 
                 refpreprocessed = mask_ROI(refpreprocessed, roi_polygon)
                 ll, ur = get_maximal_rectangle([roi_polygon])
@@ -658,9 +668,20 @@ class TissueImage:
         self,
         low_thresh,
         high_thresh,
+        low_auto_thresh=None,
+        high_auto_thresh=None,
         particle_filter_size=64
     ):
         """."""
+        lly, llx, ury, urx = self.in_box
+        if low_auto_thresh is not None:
+            low_thresh = eval(f'threshold_{low_auto_thresh}(self.imdenoised[:, lly:ury, llx:urx])')
+        if high_auto_thresh is not None:
+            high_thresh = eval(f'threshold_{high_auto_thresh}(self.imdenoised[:, lly:ury, llx:urx])')
+        self.LOW_THRESH, self.HIGH_THRESH = low_thresh, high_thresh
+        self.LOW_AUTO_THRESH = low_auto_thresh
+        self.HIGH_AUTO_THRESH = high_auto_thresh
+
         thresholded = threshold(self.imdenoised, low_thresh, high_thresh)
         labels = label_thresholded(thresholded)
 
@@ -684,92 +705,106 @@ class TissueImage:
 
     def volume_cutoff(
         self,
-        low_volume_cutoff=64
+        low_volume_cutoff=64,
+        gui=True
     ):
-        self.low_volume_cutoff = low_volume_cutoff
-        SCALE = self.SCALE
-        viewer = napari.Viewer(ndisplay=3)
-        viewer.add_image(self.imdenoised, scale=SCALE)
-        viewer.add_labels(self.labels, rendering='translucent', opacity=.5, scale=SCALE)
-
-        region_props = PyQt5.QtWidgets.QLabel()
+        self.LOW_VOLUME_CUTOFF = low_volume_cutoff
         self.region_inclusivity = np.ones(len(self.regions), dtype=bool)
         self.REGION_INCLUSIVITY_LABELS = ['Include Region', 'Exclude Region']
+        if gui:
+            SCALE = self.SCALE
+            viewer = napari.Viewer(ndisplay=3)
+            viewer.add_image(self.imdenoised, scale=SCALE)
+            viewer.add_labels(self.labels, rendering='translucent', opacity=.5, scale=SCALE)
 
-        n_region = 0
-        PROPS = ['vol',
-        # 'convex_area',
-        # 'equivalent_diameter',
-        # 'euler_number',
-        # 'extent',
-        # 'feret_diameter_max',
-        # 'major_axis_length',
-        # 'minor_axis_length',
-        # 'solidity'
-        ]
+            region_props = PyQt5.QtWidgets.QLabel()
 
-        @magicgui(
-            call_button='Exclude regions by volume',
-            cutoff={'widget_type': 'Slider', 'max': self.regions[-1]['vol']}
-        )
-        def vol_cutoff_update(
-            cutoff=low_volume_cutoff
-        ):
-            layer_names = [layer.name for layer in viewer.layers]
-            self.low_volume_cutoff = cutoff
+            n_region = 0
+            PROPS = ['vol',
+            # 'convex_area',
+            # 'equivalent_diameter',
+            # 'euler_number',
+            # 'extent',
+            # 'feret_diameter_max',
+            # 'major_axis_length',
+            # 'minor_axis_length',
+            # 'solidity'
+            ]
+
+            @magicgui(
+                call_button='Exclude regions by volume',
+                cutoff={'widget_type': 'Slider', 'max': self.regions[-1]['vol']}
+            )
+            def vol_cutoff_update(
+                cutoff=low_volume_cutoff
+            ):
+                layer_names = [layer.name for layer in viewer.layers]
+                self.LOW_VOLUME_CUTOFF = cutoff
+                self.labels.fill(0)
+                itr = 1
+                filtered_regions = []
+                for region in self.regions:
+                    if cutoff <= region['vol']:
+                        minz, miny, minx, maxz, maxy, maxx = region['bbox']
+                        self.labels[minz:maxz, miny:maxy, minx:maxx] += region['image'] * itr
+                        itr += 1
+                        filtered_regions.append(region)
+                viewer.layers[layer_names.index('Labels')].data = self.labels
+                self.regions = filtered_regions
+                self.imsegmented = self.imdenoised * (self.labels > 0)
+                select_region()
+
+            @magicgui(
+                auto_call=True,
+                selected_region={'maximum': len(self.regions)-1},
+                select_region=dict(widget_type='PushButton', text='Select Region')
+            )
+            def select_region(
+                selected_region=n_region,
+                select_region=True  # just for activating the method
+            ):
+                global n_region
+                n_region = selected_region
+                minz, miny, minx, maxz, maxy, maxx = self.regions[n_region]['bbox']
+                centroid = self.regions[n_region]['centroid']
+                if SCALE is not None:
+                    centroid = centroid * np.array(SCALE)
+                    minz *= SCALE[0]; maxz *= SCALE[0]
+                    miny *= SCALE[1]; maxy *= SCALE[1]
+                    minx *= SCALE[2]; maxx *= SCALE[2]
+
+                if viewer.dims.ndisplay == 3:
+                    viewer.camera.center = centroid
+                elif viewer.dims.ndisplay == 2:
+                    viewer.dims.set_current_step(0, round(centroid[0]))
+                    viewer.window.qt_viewer.view.camera.set_state({'rect': Rect(minx, miny, maxx-minx, maxy-miny)})
+
+                data = '<table cellspacing="8">'
+                for prop in PROPS:
+                    name = prop
+                    data += '<tr><td><b>' + name + '</b></td><td>' + str(eval(f'self.regions[{n_region}]["{prop}"]')) + '</td></tr>'
+                data += '</table>'
+                region_props.setText(data)
+
+            viewer.window.add_dock_widget(vol_cutoff_update, name='Volume Cutoff', area='bottom')
+            viewer.window._dock_widgets['Volume Cutoff'].setFixedHeight(90)
+            viewer.window.add_dock_widget(select_region, name='Select Region')
+            viewer.window._dock_widgets['Select Region'].setFixedHeight(100)
+            viewer.window.add_dock_widget(region_props, name='Region Properties')
+            viewer.window._dock_widgets['Select Region'].setFixedHeight(270)
+            select_region()
+        else:
             self.labels.fill(0)
             itr = 1
             filtered_regions = []
             for region in self.regions:
-                if cutoff <= region['vol']:
+                if low_volume_cutoff <= region['vol']:
                     minz, miny, minx, maxz, maxy, maxx = region['bbox']
                     self.labels[minz:maxz, miny:maxy, minx:maxx] += region['image'] * itr
                     itr += 1
                     filtered_regions.append(region)
-            viewer.layers[layer_names.index('Labels')].data = self.labels
             self.regions = filtered_regions
             self.imsegmented = self.imdenoised * (self.labels > 0)
-            select_region()
-
-        @magicgui(
-            auto_call=True,
-            selected_region={'maximum': len(self.regions)-1},
-            select_region=dict(widget_type='PushButton', text='Select Region')
-        )
-        def select_region(
-            selected_region=n_region,
-            select_region=True  # just for activating the method
-        ):
-            global n_region
-            n_region = selected_region
-            minz, miny, minx, maxz, maxy, maxx = self.regions[n_region]['bbox']
-            centroid = self.regions[n_region]['centroid']
-            if SCALE is not None:
-                centroid = centroid * np.array(SCALE)
-                minz *= SCALE[0]; maxz *= SCALE[0]
-                miny *= SCALE[1]; maxy *= SCALE[1]
-                minx *= SCALE[2]; maxx *= SCALE[2]
-
-            if viewer.dims.ndisplay == 3:
-                viewer.camera.center = centroid
-            elif viewer.dims.ndisplay == 2:
-                viewer.dims.set_current_step(0, round(centroid[0]))
-                viewer.window.qt_viewer.view.camera.set_state({'rect': Rect(minx, miny, maxx-minx, maxy-miny)})
-
-            data = '<table cellspacing="8">'
-            for prop in PROPS:
-                name = prop
-                data += '<tr><td><b>' + name + '</b></td><td>' + str(eval(f'self.regions[{n_region}]["{prop}"]')) + '</td></tr>'
-            data += '</table>'
-            region_props.setText(data)
-
-        viewer.window.add_dock_widget(vol_cutoff_update, name='Volume Cutoff', area='bottom')
-        viewer.window._dock_widgets['Volume Cutoff'].setFixedHeight(90)
-        viewer.window.add_dock_widget(select_region, name='Select Region')
-        viewer.window._dock_widgets['Select Region'].setFixedHeight(100)
-        viewer.window.add_dock_widget(region_props, name='Region Properties')
-        viewer.window._dock_widgets['Select Region'].setFixedHeight(270)
-        select_region()
 
     def approximate_somas(
         self,
@@ -781,10 +816,11 @@ class TissueImage:
 
     def separate_clumps(
         self,
-        seed_src=None
+        seed_src=None,
+        gui=True,
+        sync=False
     ):
         SCALE = self.SCALE
-        region_inclusivity = self.region_inclusivity
         somas_estimates = self.somas_estimates
 
         self.regions = sorted(self.regions, key=lambda region: region['vol'])
@@ -796,9 +832,8 @@ class TissueImage:
             reconstructed_labels[minz:maxz, miny:maxy, minx:maxx] += regions[itr]['image'] * (itr + 1)
         self.reconstructed_labels = reconstructed_labels
 
-
         region_props = PyQt5.QtWidgets.QLabel()
-        region_inclusivity = np.ones(len(regions), dtype=bool)
+        region_inclusivity = self.region_inclusivity #  np.ones(len(regions), dtype=bool)
         REGION_INCLUSIVITY_LABELS = self.REGION_INCLUSIVITY_LABELS
         filtered_regions = None
         self.n_region = 0
@@ -1033,26 +1068,18 @@ class TissueImage:
             self.reconstructed_labels = watershed_results
             self.imsegmented = self.imdenoised * (watershed_results > 0)
 
+            if sync:
+                self.refine_soma_approx(sync=True)
 
+        # if sync and gui is False:
+        # else:
         viewer = napari.Viewer(ndisplay=3)
         viewer.add_image(self.imdenoised, scale=SCALE, name='denoised')
         viewer.add_image(self.imsegmented, scale=SCALE, name='segmented')
         viewer.add_labels(self.reconstructed_labels, rendering='translucent', opacity=.5,
-                          scale=SCALE, name='reconstructed_labels')
+                        scale=SCALE, name='reconstructed_labels')
         viewer.add_points(somas_estimates, face_color='orange', edge_width=0,
                         opacity=.6, size=5, name='somas_coords', scale=SCALE)
-        # viewer.add_points(FINAL_PT_ESTIMATES, face_color='red',
-        #                   edge_width=0, opacity=.6, size=5, name='filtered_coords', scale=SCALE)
-        if seed_src is not None:
-            final_pts = np.load(seed_src, allow_pickle=True)[1].astype(int)
-            viewer.add_points(final_pts, face_color='red', edge_width=0,
-                              opacity=.6, size=5, name='filtered_coords',
-                              scale=SCALE)
-        elif self.FINAL_PT_ESTIMATES is not None:
-            viewer.add_points(self.FINAL_PT_ESTIMATES, face_color='red', edge_width=0,
-                              opacity=.6, size=5, name='filtered_coords',
-                              scale=SCALE)
-
         viewer.window.add_dock_widget(select_region, name='Select Region')
         viewer.window._dock_widgets['Select Region'].setFixedHeight(100)
         viewer.window.add_dock_widget(region_props, name='Region Properties')
@@ -1070,6 +1097,20 @@ class TissueImage:
         viewer.window._dock_widgets['Confirm Changes'].setFixedHeight(70)
 
         select_region()
+
+        if seed_src is not None:
+            final_pts = np.load(seed_src, allow_pickle=True)[1].astype(int)
+            viewer.add_points(final_pts, face_color='red', edge_width=0,
+                              opacity=.6, size=5, name='filtered_coords',
+                              scale=SCALE)
+        elif self.FINAL_PT_ESTIMATES is not None:
+            viewer.add_points(self.FINAL_PT_ESTIMATES, face_color='red', edge_width=0,
+                              opacity=.6, size=5, name='filtered_coords',
+                              scale=SCALE)
+        else:
+            for i in range(len(self.regions)):
+                select_region(i, True)
+                interactive_segment1()
 
     def show_segmented(self, view='single', grid_size=None):
         """View segmentation results.
@@ -1097,7 +1138,7 @@ class TissueImage:
             self.OBJ_INDEX = obj_index
             extracted_cell = extract_obj(regions[obj_index], segmented)
             # minz, miny, minx, maxz, maxy, maxx = regions[obj_index]['bbox']
-            projectXYZ(extracted_cell, .5, .5, 1)
+            projectXYZ(extracted_cell, *self.SCALE)
 
         if view == 'grid':
             # Set `BATCH_NO` to view detected objects in paginated 2D MIP views.
@@ -1109,7 +1150,7 @@ class TissueImage:
                 obj_index=widgets.IntSlider(min=0, max=len(regions)-1,
                 layout=widgets.Layout(width='100%')))
     
-    def refine_soma_approx(self):
+    def refine_soma_approx(self, sync=False):
         self.n_region = 0
         denoised = self.imdenoised
         regions = self.regions
@@ -1177,25 +1218,110 @@ class TissueImage:
             FINAL_PT_ESTIMATES = np.vstack((FINAL_PT_ESTIMATES, somas_coords+ll))
             FINAL_PT_ESTIMATES = np.unique(FINAL_PT_ESTIMATES, axis=0)
             self.FINAL_PT_ESTIMATES = FINAL_PT_ESTIMATES
+    
+        @magicgui(
+            call_button="Confirm and apply all changes"
+        )
+        def save_approximates():
+            somas_estimates = np.unique(self.FINAL_PT_ESTIMATES, axis=0)
+            filtered_regions, residue = [], []
+            separated_clumps = []
+
+            itr = 0
+            for region in self.regions:
+                minz, miny, minx, maxz, maxy, maxx = region['bbox']
+                ll = np.array([minz, miny, minx])  # lower-left
+                ur = np.array([maxz, maxy, maxx]) - 1  # upper-right
+                inidx = np.all(np.logical_and(ll <= somas_estimates, somas_estimates <= ur), axis=1)
+                somas_coords = somas_estimates[inidx].astype(np.int64)
+
+                if len(somas_coords) == 0:
+                    print('Delete region:', itr)
+                    residue.append(region)
+                elif len(np.unique(somas_coords.astype(int), axis=0)) > 1:  # clumpSep
+                    somas_coords = somas_coords.astype(int)
+                    somas_coords -= ll
+                    im = self.imdenoised[minz:maxz, miny:maxy, minx:maxx].copy()
+                    im[~region['image']] = 0
+                    markers = np.zeros(region['image'].shape)
+
+                    somas_coords = np.array([x for x in somas_coords if region['image'][tuple(x)] > 0])
+
+                    if len(somas_coords) == 0:  # no marked point ROI
+                        print('Delete region:', itr)
+
+                    if somas_coords.shape[0] == 1:
+                        filtered_regions.append(region)
+                        continue
+
+                    for i in range(somas_coords.shape[0]):
+                        markers[tuple(somas_coords[i])] = i + 1
+                        separated_clumps.append(somas_coords[i])
+
+                    labels = _segment_clump(im, markers)
+                    separated_regions = arrange_regions(labels)
+                    for r in separated_regions:
+                        r['centroid'] = (minz + r['centroid'][0], miny + r['centroid'][1], minx + r['centroid'][2])
+                        r['bbox'] = (minz + r['bbox'][0], miny + r['bbox'][1], minx + r['bbox'][2], minz + r['bbox'][3], miny + r['bbox'][4], minx + r['bbox'][5])
+                        # r.slice = (slice(minz + r.bbox[0], minz + r.bbox[3]),
+                        #            slice(miny + r.bbox[1], miny + r.bbox[4]),
+                        #         slice(minx + r.bbox[2], minx + r.bbox[5]))
+                    print('Split clump region:', itr)
+                    filtered_regions.extend(separated_regions)
+                else:
+                    filtered_regions.append(region)
+                itr += 1
+
+            self.regions = sorted(filtered_regions, key=lambda region: region['vol'])
+            self.residue = residue
+            watershed_results = np.zeros(self.imdenoised.shape, dtype=int)
+            for itr in range(len(filtered_regions)):
+                minz, miny, minx, maxz, maxy, maxx = filtered_regions[itr]['bbox']
+                watershed_results[minz:maxz, miny:maxy, minx:maxx] += filtered_regions[itr]['image'] * (itr + 1)
+
+            # After all changes (for reproducibility)
+            # discarded clump ROI: to be subtracted: np.setdiff1d(somas_estimates, final_soma)
+            ALL_PT_ESTIMATES, FINAL_PT_ESTIMATES = self.somas_estimates.copy(), somas_estimates
+            self.ALL_PT_ESTIMATES = ALL_PT_ESTIMATES
+            self.FINAL_PT_ESTIMATES = FINAL_PT_ESTIMATES
+            self.reconstructed_labels = watershed_results
+            self.imsegmented = self.imdenoised * (watershed_results > 0)
+
+            if sync:
+                self.export_cropped(self.LOW_VOLUME_CUTOFF, self.HIGH_VOLUME_CUTOFF,
+                    self.OUT_DIMS, self.SEGMENT_TYPE)
 
         viewer.window.add_dock_widget(view_single_region, name='View individual region')
         viewer.window._dock_widgets['View individual region'].setFixedHeight(70)
         viewer.window.add_dock_widget(update_soma_estimates, name='Update soma estimates')
+        viewer.window._dock_widgets['Update soma estimates'].setFixedHeight(70)
+        viewer.window.add_dock_widget(save_approximates, name='Confirm all changes')
         view_single_region()
 
     def export_cropped(
-        self
+        self,
+        low_volume_cutoff=None,
+        high_volume_cutoff=None,
+        out_dims='both',
+        segment_type='both',
+        gui=True,
     ):
-        self.LOW_VOLUME_CUTOFF = self.regions[0]['vol']  # filter noise/artifacts
-        self.HIGH_VOLUME_CUTOFF = self.regions[-1]['vol']  # filter cell clusters
-        self.OUTPUT_OPTION = 'both'  # '3d' for 3D cells, 'mip' for Max Intensity Projections
-        self.SEGMENT_TYPE = 'both'
-        SCALE = self.SCALE
-        reconstructed_cells = None
+        if low_volume_cutoff is None:
+            low_volume_cutoff = self.LOW_VOLUME_CUTOFF# self.regions[0]['vol']
+        if high_volume_cutoff is None:
+            high_volume_cutoff = self.regions[-1]['vol']
 
-        viewer = napari.Viewer(ndisplay=3)
+        if low_volume_cutoff < self.LOW_VOLUME_CUTOFF:
+            raise ValueError('low_volume_cutoff should not be lesser than previously set.')
+
+        self.LOW_VOLUME_CUTOFF = low_volume_cutoff  # filter noise/artifacts
+        self.HIGH_VOLUME_CUTOFF = high_volume_cutoff  # filter cell clusters
+        self.OUT_DIMS = out_dims  # '3d' for 3D cells, 'mip' for Max Intensity Projections
+        self.SEGMENT_TYPE = segment_type
+        SCALE = self.SCALE
+
         reconstructed_cells = np.zeros_like(self.imdenoised)
-        viewer.add_image(reconstructed_cells, colormap='inferno', scale=SCALE)
+
         minz, miny, minx, maxz, maxy, maxx = self.regions[0]['bbox']
 
         self.n_region = 0
@@ -1219,8 +1345,9 @@ class TissueImage:
                     segmented_cell = region['image'] * self.imdenoised[minz:maxz, miny:maxy, minx:maxx]
                     segmented_cell = segmented_cell / (segmented_cell.max() - segmented_cell.min())
                     reconstructed_cells[minz:maxz, miny:maxy, minx:maxx] += segmented_cell
-            minz, miny, minx, maxz, maxy, maxx = self.regions[n_region]['bbox']
-            viewer.layers[0].data = reconstructed_cells
+            minz, miny, minx, maxz, maxy, maxx = self.regions[self.n_region]['bbox']
+            if gui:
+                viewer.layers[0].data = reconstructed_cells
 
         vol_cutoff_slider.valueChanged.connect(vol_cutoff_update)
 
@@ -1231,25 +1358,27 @@ class TissueImage:
             segment_type=dict(choices=['both', 'segmented', 'unsegmented'])
         )
         def export(
-            output_option,
-            segment_type
+            output_option=out_dims,
+            segment_type=segment_type
         ):
-            self.OUTPUT_OPTION, self.SEGMENT_TYPE = output_option, segment_type
+            self.OUT_DIMS, self.SEGMENT_TYPE = output_option, segment_type
             self.imsegmented = reconstructed_cells
             export_cells(self.im_path, self.LOW_VOLUME_CUTOFF,
                          self.HIGH_VOLUME_CUTOFF, output_option, self.imdenoised,
                          self.regions, None, segment_type, self.ROI_NAME, self.roi_polygon)
 
             params = {
-                    'ref_impath': self.ref_impath,
-                    'CLIP_LIMIT': self.CLIP_LIMIT,
-                    'LOW_THRESH': self.LOW_THRESH,
-                    'HIGH_THRESH': self.HIGH_THRESH,
-                    'NAME_ROI': self.ROI_NAME,
-                    'PRE_LOW_VOLUME_CUTOFF': self.PRE_LOW_VOLUME_CUTOFF,
-                    'LOW_VOLUME_CUTOFF': self.LOW_VOLUME_CUTOFF,  # filter noise/artifacts
-                    'HIGH_VOLUME_CUTOFF': self.HIGH_VOLUME_CUTOFF,  # filter cell clusters
-                    'OUTPUT_TYPE': self.SEGMENT_TYPE
+                'NAME_ROI': self.ROI_NAME,
+                'ref_impath': self.ref_impath,
+                'CLIP_LIMIT': self.CLIP_LIMIT,
+                'LOW_THRESH': self.LOW_THRESH,
+                'HIGH_THRESH': self.HIGH_THRESH,
+                'LOW_AUTO_THRESH': self.LOW_AUTO_THRESH,
+                'HIGH_AUTO_THRESH': self.HIGH_AUTO_THRESH,
+                'LOW_VOLUME_CUTOFF': self.LOW_VOLUME_CUTOFF,  # filter noise/artifacts
+                'HIGH_VOLUME_CUTOFF': self.HIGH_VOLUME_CUTOFF,  # filter cell clusters
+                'SEGMENT_TYPE': self.SEGMENT_TYPE,
+                'OUTPUT_DIMS': self.OUT_DIMS,
             }
 
             DIR = getcwd() + '/Autocropped/'
@@ -1262,8 +1391,14 @@ class TissueImage:
             out = np.array([self.ALL_PT_ESTIMATES, self.FINAL_PT_ESTIMATES])
             np.save(OUT_DIR + '.somas_estimates.npy', out)
 
-        viewer.window.add_dock_widget(vol_cutoff_slider, name='Volume Cutoff', area='bottom')
+        if gui:
+            viewer = napari.Viewer(ndisplay=3)
+            viewer.add_image(reconstructed_cells, colormap='inferno', scale=SCALE)
+            viewer.window.add_dock_widget(vol_cutoff_slider, name='Volume Cutoff', area='bottom')
 
-        viewer.window._dock_widgets['Volume Cutoff'].setFixedHeight(80)
-        viewer.window.add_dock_widget(export, name='Export Cells')
-        vol_cutoff_update()
+            viewer.window._dock_widgets['Volume Cutoff'].setFixedHeight(80)
+            viewer.window.add_dock_widget(export, name='Export Cells')
+            vol_cutoff_update()
+        else:
+            vol_cutoff_update()
+            export(out_dims, segment_type)
