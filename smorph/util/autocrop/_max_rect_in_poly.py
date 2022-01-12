@@ -25,12 +25,7 @@ def _get_intersection(coords):
     inter_coords = zip(
         ipoly.exterior.coords.xy[0], ipoly.exterior.coords.xy[1])
 
-    inter_gj = {"geometry":
-                {"coordinates": [inter_coords],
-                 "type": "Polygon"},
-                "properties": {}, "type": "Feature"}
-
-    return inter_gj, inter_coords
+    return inter_coords
 
 
 def __two_pts_to_line(pt1, pt2):
@@ -68,13 +63,14 @@ def _pts_to_leq(coords):
     return A1, A2, B
 
 
-def get_maximal_rectangle(coords):
+def get_maximal_rectangle(coords, point=None):
     """Find the largest, inscribed, axis-aligned rectangle.
     :param coordinates:
         A list of of [x, y] pairs describing a closed, convex polygon.
     """
-    _, coordinates = _get_intersection(coords)
+    coordinates = _get_intersection(coords)
     coordinates = np.array((list(coordinates)))
+
     x_range = np.max(coordinates, axis=0)[0]-np.min(coordinates, axis=0)[0]
     y_range = np.max(coordinates, axis=0)[1]-np.min(coordinates, axis=0)[1]
 
@@ -82,16 +78,17 @@ def get_maximal_rectangle(coords):
     sc_coordinates = coordinates/scale
 
     poly = Polygon(sc_coordinates)
-    inside_pt = (poly.representative_point().x,
-                 poly.representative_point().y)
+
+    inside_pt = ((poly.representative_point().x,
+                 poly.representative_point().y) if point is None else sc_coordinates[point])
 
     A1, A2, B = _pts_to_leq(sc_coordinates)
 
-    bl = cvxpy.Variable(2)
-    tr = cvxpy.Variable(2)
-    br = cvxpy.Variable(2)
-    tl = cvxpy.Variable(2)
-    obj = cvxpy.Maximize(cvxpy.log(tr[0] - bl[0]) + cvxpy.log(tr[1] - bl[1]))
+    bl = cvxpy.Variable(2)  # bottom left
+    tr = cvxpy.Variable(2)  # top right
+    br = cvxpy.Variable(2)  # bottom right
+    tl = cvxpy.Variable(2)  # top left
+    obj = cvxpy.Maximize(cvxpy.log(tr[0] - bl[0]) + cvxpy.log(bl[1] - tr[1]))  # (tr[0] - bl[0]) * (bl[1] - tr[1]))
     constraints = [bl[0] == tl[0], br[0] == tr[0],
                    tl[1] == tr[1], bl[1] == br[1]]
 
@@ -109,9 +106,11 @@ def get_maximal_rectangle(coords):
 
     prob = cvxpy.Problem(obj, constraints)
     # ECOS, CVXOPT, SCS, SCIPY
-    prob.solve(max_iters=1000, reltol=1e-9)
+    prob.solve()
 
+    # print(bl.value, tr.value, br.value, tl.value)
     bottom_left = np.array(bl.value).T * scale
     top_right = np.array(tr.value).T * scale
+    # print(bottom_left, top_right)
 
     return bottom_left, top_right

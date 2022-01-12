@@ -61,7 +61,7 @@ def denoise(img, denoise_parameters):
     for i in range(denoised.shape[0]):
         denoised[i] = denoise_nl_means(img[i], **denoise_parameters)
 
-    denoised = imnorm(denoised)
+    # denoised = imnorm(denoised)
     return denoised
 
 

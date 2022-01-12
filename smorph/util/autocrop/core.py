@@ -490,8 +490,8 @@ class TissueImage:
         that contains it.
 
     """
-    __slots__ = ('im_path', 'ref_im_path', 'imoriginal', 'imdeconvolved', 'impreprocessed',
-                 'imdenoised', 'refdenoised', 'imsegmented', 'labels',
+    __slots__ = ('im_path', 'REF_IM_PATH', 'imoriginal', 'imdeconvolved', 'impreprocessed',
+                 'imdenoised', 'imview', 'imrect', 'refdenoised', 'imsegmented', 'labels',
                  'regions', 'in_box', 'roi_polygon', 'LOW_THRESH', 'HIGH_THRESH', 'LOW_AUTO_THRESH', 'HIGH_AUTO_THRESH', 'region_inclusivity', 'REGION_INCLUSIVITY_LABELS',
                  'somas_estimates', 'DECONV_ITR', 'CLIP_LIMIT', 'SCALE', 'ROI_PATH', 'ROI_NAME', 'REF_ROI_PATH', 'CACHE_DIR',
                  'ALL_PT_ESTIMATES', 'FINAL_PT_ESTIMATES', 'residue', 'n_region', 'OBJ_INDEX', 'reconstructed_labels',
@@ -514,7 +514,7 @@ class TissueImage:
         ):
             raise ValueError('Load ROI properly')
         self.im_path = im_path
-        self.ref_im_path = ref_im_path
+        self.REF_IM_PATH = ref_im_path
         self.imoriginal = imoriginal = imread(im_path)
         self.ROI_PATH = roi_path
         self.REF_ROI_PATH = ref_roi_path
@@ -544,6 +544,7 @@ class TissueImage:
             imdeconvolved = deconvolve(imoriginal, im_path, iters=deconv_itr)
 
         self.imdeconvolved = imdeconvolved
+        imshape = imdeconvolved.shape
 
         SCALE = None
         try:
@@ -582,9 +583,11 @@ class TissueImage:
         self.roi_polygon = roi_polygon
 
         if select_roi:
-            imoriginal = mask_ROI(imoriginal, roi_polygon)
-            imdeconvolved = mask_ROI(imdeconvolved, roi_polygon)
-            impreprocessed = mask_ROI(impreprocessed, roi_polygon)
+            _, imoriginal = mask_ROI(imoriginal, roi_polygon)
+            _, imdeconvolved = mask_ROI(imdeconvolved, roi_polygon)
+            self.imrect, impreprocessed = mask_ROI(impreprocessed, roi_polygon)
+        else:
+            self.imrect = impreprocessed
 
         self.imoriginal = imoriginal
         self.imdeconvolved = imdeconvolved
@@ -617,7 +620,6 @@ class TissueImage:
                     background = rolling_ball(refdeconvolved, radius=(min(refdeconvolved.shape)-1)//2)
                     refpreprocessed = equalize_adapthist(refdeconvolved-background, clip_limit=clip_limit)
 
-
                 SELECT_ROI = ref_roi_path is not None
 
                 roi_polygon = (np.array([[0, 0], [refpreprocessed.shape[0]-1, 0],
@@ -625,43 +627,70 @@ class TissueImage:
                                          [0, refpreprocessed.shape[1]-1]])
                     if not SELECT_ROI else select_ROI(refpreprocessed, f'{imname}-{roi_name}', ref_roi_path))
 
+                ref_denoise_parameters = calibrate_nlm_denoiser(refpreprocessed)
                 refpreprocessed = mask_ROI(refpreprocessed, roi_polygon)
-                ll, ur = get_maximal_rectangle([roi_polygon])
-                if SELECT_ROI:
-                    ll, ur = np.ceil(ll).astype(int), np.floor(ur).astype(int)
-                    llx, lly = ll; urx, ury = ur
-                    llx -= roi_polygon[:, 0].min(); urx -= roi_polygon[:, 0].min()
-                    lly -= roi_polygon[:, 1].min(); ury -= roi_polygon[:, 1].min()
-                else:
-                    lly = 0; llx = 0
-                    ury, urx = refpreprocessed.shape[1:]
-                    ury -= 1; urx -= 1
+                # ll, ur = get_maximal_rectangle([roi_polygon])
+                # if SELECT_ROI:
+                #     ll, ur = np.ceil(ll).astype(int), np.floor(ur).astype(int)
+                #     llx, lly = ll; urx, ury = ur
+                #     llx -= roi_polygon[:, 0].min(); urx -= roi_polygon[:, 0].min()
+                #     lly -= roi_polygon[:, 1].min(); ury -= roi_polygon[:, 1].min()
+                # else:
+                #     lly = 0; llx = 0
+                #     ury, urx = refpreprocessed.shape[1:]
+                #     ury -= 1; urx -= 1
 
-                denoise_parameters = calibrate_nlm_denoiser(refpreprocessed[:, lly:ury, llx:urx])
-                refdenoised = denoise(refpreprocessed, denoise_parameters)
+                refdenoised = denoise(refpreprocessed, ref_denoise_parameters)
                 np.save(path.join(cache_dir, imname + REF_SUFFIX), refdenoised)
 
             self.refdenoised = refdenoised
 
+        # change y axis from rows to cartesian
+        factor = np.array([0, imshape[1]-1])
+        coords = (factor - roi_polygon) * np.array([-1, 1])
+
         # get the maximally inscribed rectangle
-        ll, ur = get_maximal_rectangle([roi_polygon])
+        ll, ur = None, None
+        try:
+            ll, ur = get_maximal_rectangle([coords])
+        except:
+            i = 0
+            while (
+                (ll is not None or ur is not None)
+                and (ll[0] < 0 or ll[1] < 0 or ur[0] < 0 or ur[1] < 0)
+                and i < coords.shape[0]
+            ):
+                ll, ur = get_maximal_rectangle([coords], i)
+                i += 1
+        
+        if (
+            ll is None or ur is None
+            or (ll[0] < 0 or ll[1] < 0 or ur[0] < 0 or ur[1] < 0)
+        ):
+            ll, ur = np.array([roi_polygon[:, 0].min(), roi_polygon[:, 1].min()]), np.array(self.imrect.shape[1:][::-1])-1 + np.array((roi_polygon[:, 0].min(), roi_polygon[:, 1].min()))
+        else:
+            ll = (ll - factor) * np.array([1, -1])
+            ur = (ur - factor) * np.array([1, -1])
 
         if select_roi:
             ll, ur = np.ceil(ll).astype(int), np.floor(ur).astype(int)
-            llx, lly = ll; urx, ury = ur
-            llx -= roi_polygon[:, 0].min(); urx -= roi_polygon[:, 0].min()
-            lly -= roi_polygon[:, 1].min(); ury -= roi_polygon[:, 1].min()
+            minx, miny = ll; maxx, maxy = ur
+            minx -= roi_polygon[:, 0].min(); maxx -= roi_polygon[:, 0].min()
+            miny -= roi_polygon[:, 1].min(); maxy -= roi_polygon[:, 1].min()
         else:
-            lly = 0; llx = 0
-            ury, urx = impreprocessed.shape[1:]
-            ury -= 1; urx -= 1
+            miny = 0; minx = 0
+            maxy, maxx = impreprocessed.shape[1:]
+            maxy -= 1; maxx -= 1
         
-        self.in_box = (lly, llx, ury, urx)
+        self.in_box = (miny, minx, maxy, maxx)
 
-        denoise_parameters = calibrate_nlm_denoiser(impreprocessed[:, lly:ury, llx:urx])
+        denoise_parameters = calibrate_nlm_denoiser(self.imrect[:, miny:maxy, minx:maxx])
         imdenoised = denoise(impreprocessed, denoise_parameters)
+        self.imrect = denoise(self.imrect, denoise_parameters)
 
         imdenoised = match_histograms(imdenoised, refdenoised)
+        self.imrect = match_histograms(self.imrect, refdenoised)
+        self.imrect = np.maximum(self.imrect, imdenoised)
         self.imdenoised = imdenoised
 
     def segment(
@@ -673,11 +702,11 @@ class TissueImage:
         particle_filter_size=64
     ):
         """."""
-        lly, llx, ury, urx = self.in_box
+        miny, minx, maxy, maxx = self.in_box
         if low_auto_thresh is not None:
-            low_thresh = eval(f'threshold_{low_auto_thresh}(self.imdenoised[:, lly:ury, llx:urx])')
+            low_thresh = eval(f'threshold_{low_auto_thresh}(self.imdenoised[:, miny:maxy, minx:maxx])')
         if high_auto_thresh is not None:
-            high_thresh = eval(f'threshold_{high_auto_thresh}(self.imdenoised[:, lly:ury, llx:urx])')
+            high_thresh = eval(f'threshold_{high_auto_thresh}(self.imdenoised[:, miny:maxy, minx:maxx])')
         self.LOW_THRESH, self.HIGH_THRESH = low_thresh, high_thresh
         self.LOW_AUTO_THRESH = low_auto_thresh
         self.HIGH_AUTO_THRESH = high_auto_thresh
@@ -1186,10 +1215,15 @@ class TissueImage:
             filtered_coords = np.array(filtered_coords)
 
             if len(viewer.layers) == 0:
-                viewer.add_image(denoised[minz:maxz, miny:maxy, minx:maxx], name='denoised', colormap='red', scale=SCALE)
-                viewer.add_image(denoised[minz:maxz, miny:maxy, minx:maxx]*regions[selected_region]['image'], name='segmented', colormap='red', scale=SCALE)
+                viewer.add_image(denoised[minz:maxz, miny:maxy, minx:maxx],
+                                 name='denoised', colormap='red', scale=SCALE,
+                                 contrast_limits=(0,1))
+                viewer.add_image(denoised[minz:maxz, miny:maxy, minx:maxx]*regions[selected_region]['image'],
+                                 name='segmented', colormap='red', scale=SCALE,
+                                 contrast_limits=(0,1))
                 viewer.add_points(filtered_coords, face_color='lime', edge_width=0,
-                                  opacity=.6, size=5, name='filtered_coords', scale=SCALE)
+                                  opacity=.6, size=5, name='filtered_coords',
+                                  scale=SCALE)
             else:
                 viewer.layers[0].data = denoised[minz:maxz, miny:maxy, minx:maxx]
                 viewer.layers[1].data = extracted_cell
@@ -1369,7 +1403,7 @@ class TissueImage:
 
             params = {
                 'NAME_ROI': self.ROI_NAME,
-                'ref_impath': self.ref_impath,
+                'REF_IM_PATH': self.REF_IM_PATH,
                 'CLIP_LIMIT': self.CLIP_LIMIT,
                 'LOW_THRESH': self.LOW_THRESH,
                 'HIGH_THRESH': self.HIGH_THRESH,

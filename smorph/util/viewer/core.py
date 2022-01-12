@@ -124,7 +124,7 @@ def label_clusters_spatially(groups_folders):
         viewer = napari.Viewer(ndisplay=3)
         for tissue_img in dataset.keys():
             IMG_NAME = path.basename(r'{}'.format(tissue_img))
-            img = ac.import_confocal_image(tissue_img)
+            img = ac.imread(tissue_img)
 
             if type(dataset[tissue_img][0]) == dict:
                 PARENT_NAME = dataset[tissue_img][0]['parent_image']
@@ -192,7 +192,7 @@ def _identify_cell_in_tissue(img_path):
             print('Failed to load parent image!')
             return
 
-        img = ac.import_confocal_image(cell_data['parent_image'])
+        img = ac.imread(cell_data['parent_image'])
 
         (
             bounds, centroid_pts, cluster_labels
@@ -286,7 +286,7 @@ def identify_cells_in_tissue(img_paths):
         for tissue_img in dataset.keys():
             PARENT_NAME = path.basename(r'{}'.format(tissue_img))
             IMG_NAME = '.'.join(tissue_img.split('/')[-1].split('.')[:-1])
-            img = ac.import_confocal_image(tissue_img)
+            img = ac.imread(tissue_img)
             if type(dataset[tissue_img][0]) == dict:
                 (
                     bounds, centroid_pts, cluster_labels

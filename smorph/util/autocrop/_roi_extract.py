@@ -94,4 +94,4 @@ def mask_ROI(im, linebuilder):
     # reduce non-empty
     im_masked = out[:, min_y: max_y, min_x:max_x]
 
-    return im_masked
+    return im[:, min_y: max_y, min_x:max_x], im_masked
