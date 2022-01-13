@@ -13,8 +13,8 @@ numpy = "^1.18.5"
 scikit-image = "^0.19.1"
 scikit-learn = "^0.23.2"
 scipy = "^1.5.2"
-skan = "^0.8"
-numba = "^0.51.2"
+skan = "^0.9"
+numba = "0.51.2"
 pandas = "^1.1.2"
 seaborn = "^0.11.0"
 ipyvolume = "^0.5.2"
@@ -30,6 +30,7 @@ PyQt5 = "^5.15.4"
 cvxopt = "^1.2.7"
 cvxpy-base = "^1.1.18"
 ecos = "^2.0.8"
+statannotations = "^0.4.2"
 
 [tool.poetry.dev-dependencies]
 
