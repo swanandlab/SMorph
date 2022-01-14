@@ -15,8 +15,15 @@ from skimage.filters import (
     threshold_yen
 )
 from skimage.measure import label
-from skimage.morphology import closing, square
-from skimage.exposure import match_histograms  # TODO:0.18 moved to exposure
+from skimage.morphology import (
+    closing, 
+    cube,
+    square
+)
+from skimage.transform import (
+    rescale
+)
+from skimage.exposure import match_histograms
 from skimage.util import invert
 
 THRESHOLD_METHODS = ('isodata', 'li', 'mean', 'minimum',
@@ -101,6 +108,7 @@ def try_all_threshold(img, contrast_ptiles=(0, 100), figsize=(10, 6)):
 def preprocess_image(
     image,
     image_type,
+    scale,
     reference_image,
     crop_tech='manual',
     contrast_ptiles=(0, 100),
@@ -115,6 +123,7 @@ def preprocess_image(
     image_type : str
         Neuroimaging technique used to get image data of neuronal cell,
         either 'confocal' or 'DAB'.
+    scale : int or tuple
     reference_image : ndarray
         `image` would be standardized to the exposure level of this example.
     crop_tech : str
@@ -141,11 +150,16 @@ def preprocess_image(
     contrast_ptiles, threshold_method = _validate_img_args(crop_tech,
                                                            contrast_ptiles,
                                                            threshold_method)
+    factor = np.array(scale) / min(scale)
+
+    image = rescale(image, factor)
     thresholded_image = _threshold_image(image, image_type, reference_image,
                                          crop_tech, contrast_ptiles,
                                          threshold_method)
-    cleaned_image = _remove_small_object_noise(thresholded_image)
-    cleaned_image_filled_holes = _fill_holes(cleaned_image)
+    cleaned_image = (thresholded_image if crop_tech == 'auto'
+                     else _remove_small_object_noise(thresholded_image))
+    cleaned_image_filled_holes = (cleaned_image if crop_tech == 'auto'
+                                  else _fill_holes(cleaned_image))
 
     # Auto-contrast stretching aiding soma detection
     masked_image = cleaned_image_filled_holes * image
@@ -167,8 +181,9 @@ def _threshold_image(
 ):
     """Single intensity threshold via Otsu's method."""
     if reference_image is not None:
-        gray_reference_image = rgb2gray(reference_image)
-        image = match_histograms(image, gray_reference_image)
+        if reference_image.ndim == 3 and reference_image.shape[-1] == 3:
+            reference_image = rgb2gray(reference_image)
+        image = match_histograms(image, reference_image)
 
     img_rescale = _contrast_stretching(image, contrast_ptiles)
 
@@ -183,15 +198,14 @@ def _threshold_image(
         thresholded_cell = img_rescale > THRESHOLD_METHODS[method](img_rescale)
 
     if image_type == "DAB":
-        return thresholded_cell
-    elif image_type == "confocal":
         return invert(thresholded_cell)
+    elif image_type == "confocal":
+        return thresholded_cell
 
 
 def _label_objects(thresholded_image):
     """Label connected regions of a `thresholded_image`."""
-    inverted_thresholded_image = invert(thresholded_image)
-    bw = closing(inverted_thresholded_image, square(1))
+    bw = closing(thresholded_image, square(1) if thresholded_image.ndim == 2 else cube(1))
     # label image regions
     labelled_image = label(bw, return_num=True)[0]
 
@@ -213,3 +227,11 @@ def _remove_small_object_noise(thresholded_image):
 def _fill_holes(cleaned_image):
     """Fill holes in a binary image."""
     return binary_fill_holes(cleaned_image).astype(int)
+
+
+def _distance(P1, P2):
+    """Finds the Euclidian distance between two pixel/voxel positions."""
+    distance = ((P1[0] - P2[0])**2 + (P1[1] - P2[1])**2) ** 0.5
+    if len(P1) == 3:
+        distance = (distance**2 + (P1[2] - P2[2])**2) ** 0.5
+    return distance

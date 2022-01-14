@@ -60,6 +60,7 @@ def _analyze_cells(
     group_folders,
     img_type,
     groups_crop_tech,
+    scale,
     contrast_ptiles,
     threshold_method,
     sholl_step_sz,
@@ -152,7 +153,7 @@ def _analyze_cells(
 
             cell_cnt += 1
             try:
-                cell = Cell(cell_image, img_type,
+                cell = Cell(cell_image, img_type, scale,
                             crop_tech=groups_crop_tech[group_no],
                             contrast_ptiles=contrast_ptiles,
                             threshold_method=threshold_method,
@@ -187,16 +188,18 @@ def _analyze_cells(
                 dataset_features.append(cell_features)
 
                 if save_results:
-                    plt.imshow(cell.image, cmap='gray')
-                    idx = np.array([(i, j) for (i, j), val in np.ndenumerate(
-                        cell.skeleton) if val != 0])
-                    plt.plot(idx[:, 1], idx[:, 0], 'r.', alpha=.5)
                     DIR = getcwd() + FEATURES_DIR
                     folder = file_names[cell_cnt-1].split('/')[-2]
                     mkdir_if_not(DIR + folder)
-                    plt.savefig(DIR + folder + '/' + '.'.join(file_names[
-                        cell_cnt-1].split('/')[-1].split('.')[:-1]) + '.png')
-                    plt.clf()
+                    im_name = DIR + folder + '/' + '.'.join(file_names[
+                        cell_cnt-1].split('/')[-1].split('.')[:-1])
+                    if cell.image.ndim == 2:
+                        plt.imshow(cell.image, cmap='gray')
+                        idx = np.array([(i, j) for (i, j), val in np.ndenumerate(
+                            cell.skeleton) if val != 0])
+                        plt.plot(idx[:, 1], idx[:, 0], 'r.', alpha=.5)
+                        plt.savefig(im_name + '.png')
+                        plt.clf()
             except Exception as err:
                 bad_cells_idx.append(cell_cnt - 1)
                 print('Warning: Skipping analysis of',
@@ -205,6 +208,14 @@ def _analyze_cells(
                     skip_file.write(file_names[cell_cnt - 1] + '\n')
 
         group_cnts.append(group_cell_cnt)
+        tmp_fnames = [cell_name for idx, cell_name in enumerate(file_names)
+                      if idx not in bad_cells_idx][:sum(group_cnts)]
+        features = DataFrame(dataset_features, columns=_ALL_FEATURE_NAMES)
+
+        if save_results:
+            out_features = features.copy()
+            out_features.insert(0, 'cell_image_file', tmp_fnames)
+            df_to_csv(out_features, FEATURES_DIR, FEATURES_FILE_NAME)
 
     file_names = [cell_name for idx, cell_name in enumerate(file_names)
                   if idx not in bad_cells_idx]
@@ -296,7 +307,7 @@ class Groups:
     __slots__ = ('features', 'targets', 'sholl_original_plots', 'labels',
                  'sholl_polynomial_plots', 'pca_feature_names', 'markers',
                  'feature_significance', 'file_names', 'group_counts',
-                 'projected', 'sholl_step_size', 'save')
+                 'projected', 'sholl_step_size', 'save', 'scale')
 
     def __init__(
         self,
@@ -304,6 +315,7 @@ class Groups:
         image_type,
         groups_crop_tech,
         labels,
+        scale=1,
         contrast_ptiles=(0, 100),
         threshold_method='otsu',
         sholl_step_size=3,
@@ -322,7 +334,7 @@ class Groups:
             self.sholl_polynomial_plots,
             self.group_counts,
             self.file_names
-        ) = _analyze_cells(group_folders, image_type, groups_crop_tech,
+        ) = _analyze_cells(group_folders, image_type, groups_crop_tech, scale,
                            contrast_ptiles, threshold_method, sholl_step_size,
                            polynomial_degree, save_results, show_logs)
 
@@ -398,36 +410,39 @@ class Groups:
         plt.legend()
         fig = plt.gcf()
 
+        cols = list(range(sholl_step_sz,
+                          (len_polynomial_plots + 1) * sholl_step_sz,
+                          sholl_step_sz))
+
+        write_buffer = DataFrame(file_names, columns=['file_name'])
+        df_polynomial_plots = DataFrame(polynomial_plots, columns=cols)
+        write_buffer[df_polynomial_plots.columns] = df_polynomial_plots
+
+        groups = []  # list of dfs
+        pvals = []
+        lft_idx = 0
+        for group_no, group_cnt in enumerate(group_cnts):
+            groups.append(write_buffer[lft_idx: lft_idx + group_cnt])
+            lft_idx += group_cnt
+        if len(groups) == 2:
+            for i in range(1, len(cols)+1):
+                stat, pval = ttest_ind(groups[0].iloc[:, [i]],
+                                        groups[1].iloc[:, [i]],
+                                        equal_var=False)
+                pvals.append(pval)
+
         if save_results or self.save:
             # single_cell_intersections
             DIR, OUTFILE = '/Results/', 'sholl_intersections.csv'
-            cols = list(range(sholl_step_sz,
-                              (len_polynomial_plots + 1) * sholl_step_sz,
-                              sholl_step_sz))
-
-            write_buffer = DataFrame(file_names, columns=['file_name'])
-            df_polynomial_plots = DataFrame(polynomial_plots, columns=cols)
-            write_buffer[df_polynomial_plots.columns] = df_polynomial_plots
             df_to_csv(write_buffer, DIR, OUTFILE)
-
-            groups = []  # list of dfs
-            pvals = []
-            lft_idx = 0
-            for group_no, group_cnt in enumerate(group_cnts):
-                groups.append(write_buffer[lft_idx: lft_idx + group_cnt])
-                lft_idx += group_cnt
-            if len(groups) == 2:
-                for i in range(1, len(cols)+1):
-                    stat, pval = ttest_ind(groups[0].iloc[:, [i]],
-                                           groups[1].iloc[:, [i]],
-                                           equal_var=False)
-                    pvals.append(pval)
 
             OUTPLOT = 'avg_sholl_plot.png'
             savefig(fig, DIR + OUTPLOT)
+        
+        y_height = plt.gca().get_ylim()[-1]
 
         for i in range(len(pvals)):
-            plt.text(x[i], plt.gca().get_ylim(),
+            plt.text(x[i], y_height,
                      '*' if pvals[i] <= .05 else '-',
                      ha='center', va='bottom')
         plt.show()
@@ -667,13 +682,16 @@ class Groups:
                             order=self.labels)
                 sns.swarmplot(data=data, x=x, y=features[i], order=self.labels,
                               ax=ax[i], color='black', alpha=.3)
-                
-            annotator = Annotator(ax[i], [self.labels], data=data, x=x,
-                                  y=features[i])
-            annotator.configure(test='t-test_ind', text_format='star',
-                                loc='outside')
-            annotator.apply_and_annotate()
+
+            if len(self.group_counts) == 2:
+                annotator = Annotator(ax[i], [self.labels], data=data, x=x,
+                                    y=features[i])
+                annotator.configure(test='t-test_ind', text_format='star',
+                                    loc='outside')
+                annotator.apply_and_annotate()
+
             ax[i].set(xlabel=None)
+
         plt.tight_layout()
 
         if self.save:

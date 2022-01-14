@@ -548,7 +548,7 @@ class TissueImage:
 
         SCALE = None
         try:
-            if im_path.split('.')[-1] == 'czi':
+            if im_path.split('.')[-1] in ('czi'):
                 import czifile
                 metadata = czifile.CziFile(im_path).metadata(False)[
                     'ImageDocument']['Metadata']
@@ -688,8 +688,10 @@ class TissueImage:
         imdenoised = denoise(impreprocessed, denoise_parameters)
         self.imrect = denoise(self.imrect, denoise_parameters)
 
-        imdenoised = match_histograms(imdenoised, refdenoised)
-        self.imrect = match_histograms(self.imrect, refdenoised)
+        if ref_im_path is not None:
+            imdenoised = match_histograms(imdenoised, refdenoised)
+            self.imrect = match_histograms(self.imrect, refdenoised)
+
         self.imrect = np.maximum(self.imrect, imdenoised)
         self.imdenoised = imdenoised
 

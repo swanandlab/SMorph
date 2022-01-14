@@ -1,7 +1,14 @@
 import matplotlib.pyplot as plt
+import napari
 import numpy as np
 from matplotlib.colors import is_color_like
 from skimage.color import rgb2gray
+from skimage.draw import (
+    ellipsoid,
+)
+from skimage.measure import (
+    marching_cubes,
+)
 
 from ._features import _extract_cell_features
 from ..util import preprocess_image
@@ -58,7 +65,7 @@ class Cell:
         that contains it.
 
     """
-    __slots__ = ('image', 'image_type', 'cleaned_image', 'features',
+    __slots__ = ('image', 'image_type', 'scale', 'cleaned_image', 'features',
                  'convex_hull', 'skeleton', 'sholl_step_size', '_fork_coords',
                  '_branch_coords', '_branching_struct', '_concentric_coords',
                  '_sholl_intersections', '_padded_skeleton', '_pad_sk_soma',
@@ -69,6 +76,7 @@ class Cell:
         self,
         cell_image,
         image_type,
+        scale=1,
         crop_tech='manual',
         contrast_ptiles=(0, 100),
         threshold_method='otsu',
@@ -76,50 +84,67 @@ class Cell:
         sholl_step_size=3,
         polynomial_degree=3
     ):
-        image = (cell_image if cell_image.ndim == 2
-                 else rgb2gray(cell_image))
+        image = cell_image
+        if (cell_image.ndim == 3 and cell_image.shape[-1] == 3):
+            image = rgb2gray(cell_image)
         self.image_type = image_type
+        self.scale = scale
         self.sholl_step_size = sholl_step_size
         self.image, self.cleaned_image = preprocess_image(
-            image, image_type, reference_image, crop_tech,
+            image, image_type, scale, reference_image, crop_tech,
             contrast_ptiles, threshold_method)
         self.features = _extract_cell_features(
             self, sholl_step_size, polynomial_degree)
 
     def plot_convex_hull(self):
         """Plots convex hull of the skeleton of the cell."""
-        ax = plt.subplots()[1]
-        ax.set_axis_off()
-        ax.imshow(self.convex_hull)
+        if self.convex_hull.ndim == 2:
+            ax = plt.subplots()[1]
+            ax.set_axis_off()
+            ax.imshow(self.convex_hull)
+        else:
+            with napari.gui_qt():
+                viewer = napari.view_image(self.image, ndisplay=3)
+                viewer.add_labels(self.skeleton)
+                viewer.add_labels(self.convex_hull)
 
-    def plot_forks(self, highlightcolor='g'):
+    def plot_forks(self, highlightcolor='green'):
         """Plots skeleton of the cell with all furcations highlighted.
 
         Parameters
         ----------
         highlightcolor : str, optional
-            Color for highlighting the forks, by default 'g'
+            Color for highlighting the forks, by default 'green'
 
         """
         if not is_color_like(highlightcolor):
             print(f'{highlightcolor} is not a valid color. '
                   'Resetting highlight color to green.')
-            highlightcolor = 'g'
+            highlightcolor = 'green'
 
         fork_coords = self._fork_coords
-        ax = plt.subplots(figsize=(4, 4))[1]
-        ax.set_title('path')
-        ax.imshow(self.skeleton, interpolation='nearest')
+        if self.skeleton.ndim == 2:
+            ax = plt.subplots(figsize=(4, 4))[1]
+            ax.set_title('path')
+            ax.imshow(self.skeleton, interpolation='nearest')
 
-        for i in fork_coords:
-            c = plt.Circle((i[1], i[0]), 0.6, color=highlightcolor)
-            ax.add_patch(c)
+            for i in fork_coords:
+                c = plt.Circle((i[1], i[0]), 0.6, color=highlightcolor)
+                ax.add_patch(c)
 
-        ax.set_axis_off()
-        plt.tight_layout()
-        plt.show()
+            ax.set_axis_off()
+            plt.tight_layout()
+            plt.show()
+        else:
+            with napari.gui_qt():
+                viewer = napari.view_image(self.skeleton, ndisplay=3)
+                viewer.add_points(list(fork_coords), size=1, opacity=.25,
+                                  symbol='ring', face_color=highlightcolor)
 
-    def plot_branching_structure(self, colors=['r', 'b', 'm', 'g', 'c']):
+    def plot_branching_structure(
+        self,
+        colors=['red', 'blue', 'magenta', 'green', 'cyan']
+    ):
         """Plots skeleton of the cell with all levels of branching highlighted.
 
         Parameters
@@ -127,14 +152,15 @@ class Cell:
         colors : list, optional
             List of colors that distinctively highlight all levels of branching
             -- primary, secondary, tertiary, quaternary, & terminal,
-            respectively, by default ['r','b','m','g','c']
+            respectively, by default ['red', 'blue', 'magenta', 'green', 'cyan']
 
         """
         color_validations = list(map(is_color_like, colors))
         if sum(color_validations) != len(color_validations):
             print(f'{colors} is not a valid list of colors. '
-                  'Resetting colors to ["r","b","m","g","c"].')
-            colors = ['r', 'b', 'm', 'g', 'c']
+                  'Resetting colors to ["red", "blue", "magenta", '
+                  '"green", "cyan"].')
+            colors = ['red', 'blue', 'magenta', 'green', 'cyan']
 
         branching_structure = self._branching_struct
         coords = self._branch_coords
@@ -149,22 +175,31 @@ class Cell:
                     single_branch_level.extend(path_coords)
             color_branches_coords.append(single_branch_level)
 
-        ax = plt.subplots(figsize=(4, 4))[1]
-        ax.set_title('path')
-        ax.imshow(self.skeleton, interpolation='nearest')
+        if self.skeleton.ndim == 2:
+            ax = plt.subplots(figsize=(4, 4))[1]
+            ax.set_title('path')
+            ax.imshow(self.skeleton, interpolation='nearest')
 
-        for j, color_branch in enumerate(color_branches_coords):
-            if j > 4:
-                j = 4
-            for k in color_branch:
-                c = plt.Circle((k[1], k[0]), 0.5, color=colors[j])
-                ax.add_patch(c)
+            for j, color_branch in enumerate(color_branches_coords):
+                if j > 4:
+                    j = 4
+                for k in color_branch:
+                    c = plt.Circle((k[1], k[0]), 0.5, color=colors[j])
+                    ax.add_patch(c)
 
-        ax.set_axis_off()
-        plt.tight_layout()
-        plt.show()
+            ax.set_axis_off()
+            plt.tight_layout()
+            plt.show()
+        else:
+            with napari.gui_qt():
+                viewer = napari.view_labels(self.skeleton, ndisplay=3)
+                for j, color_branch in enumerate(color_branches_coords):
+                    if j > 4:
+                        j = 4
+                    viewer.add_points(color_branch, size=1, symbol='ring',
+                                      face_color=colors[j], opacity=.25)
 
-    def plot_sholl_results(self, somacolor='r', radiicolor='r'):
+    def plot_sholl_results(self, somacolor='red', radiicolor='red'):
         """Plots results of Sholl Analysis.
 
         This individually plots cell skeleton with sholl circles & Sholl radii
@@ -173,44 +208,58 @@ class Cell:
         Parameters
         ----------
         somacolor : str, optional
-            Color to highlight the skeleton soma, by default 'r'
+            Color to highlight the skeleton soma, by default 'red'
         radiicolor : str, optional
-            Color to highlight the sholl radii, by default 'r'
+            Color to highlight the sholl radii, by default 'red'
 
         """
         if not is_color_like(somacolor):
             print(f'{somacolor} is not a valid color. '
                   'Resetting highlight color to red.')
-            somacolor = 'r'
-
-        ax = plt.subplots(figsize=(10, 6))[1]
-        ax.imshow(self._padded_skeleton)
-
-        # overlay soma on skeleton
-        y, x = self._pad_sk_soma
-        c = plt.Circle((x, y), 1, color=somacolor, alpha=.9)
-        ax.add_patch(c)
-        ax.set_axis_off()
+            somacolor = 'red'
 
         radius = self.sholl_step_size
         sholl_intersections = self._sholl_intersections
 
-        # plot circles on skeleton
-        for r in range(radius, (len(sholl_intersections)+1)*radius, radius):
-            c = plt.Circle((x, y), r, fill=False, lw=2,
-                           ec=radiicolor, alpha=.64)
-            ax.add_patch(c)
-        plt.tight_layout()
-        plt.show()
+        if self.skeleton.ndim == 2:
+            ax = plt.subplots(figsize=(10, 6))[1]
+            ax.imshow(self._padded_skeleton)
 
-        # plot sholl graph showing radius vs. n_intersections
-        plt.plot(range(radius,
-                       (len(sholl_intersections)+1)*radius,
-                       radius),
-                 sholl_intersections)
-        plt.xlabel("Distance from centre")
-        plt.ylabel("No. of intersections")
-        plt.show()
+            # overlay soma on skeleton
+            y, x = self._pad_sk_soma
+            c = plt.Circle((x, y), 1, color=somacolor, alpha=.9)
+            ax.add_patch(c)
+            ax.set_axis_off()
+            # plot circles on skeleton
+            for r in range(radius, (len(sholl_intersections)+1)*radius, radius):
+                c = plt.Circle((x, y), r, fill=False, lw=2,
+                            ec=radiicolor, alpha=.64)
+                ax.add_patch(c)
+            plt.tight_layout()
+            plt.show()
+
+            # plot sholl graph showing radius vs. n_intersections
+            plt.plot(range(radius,
+                        (len(sholl_intersections)+1)*radius,
+                        radius),
+                    sholl_intersections)
+            plt.xlabel("Distance from centre")
+            plt.ylabel("No. of intersections")
+            plt.show()
+        else:
+            with napari.gui_qt():
+                viewer = napari.view_labels(self._padded_skeleton, ndisplay=3)
+                viewer.add_points([self._pad_sk_soma], face_color=somacolor,
+                                  size=1, symbol='ring', opacity=.25)
+                for r in range(radius, (len(sholl_intersections)+1)*radius, radius):
+                    el = ellipsoid(r, r, r)
+                    center = np.array(tuple(map(lambda d: d//2, el.shape)))
+                    vertse, facese, normalse, valuese = marching_cubes(el)
+                    sholl_sphere = vertse + r + self._pad_sk_soma - (center+r)
+                    viewer.add_surface((sholl_sphere, facese, valuese),
+                                       opacity=.05, blending='additive',
+                                       colormap='hsv')
+
 
     def plot_polynomial_fit(self):
         """Plots original & estimated no. of intersections vs. Sholl radii.
@@ -237,7 +286,7 @@ class Cell:
         ax = plt.axes()
         ax.scatter(reshaped_x, y_data)
         ax.plot(non_zero_radii, y_new)
-        ax.set_xlabel('x')
-        ax.set_ylabel('y')
+        ax.set_xlabel('Radii')
+        ax.set_ylabel('No. of intersections')
         ax.axis('tight')
         plt.show()

@@ -1,9 +1,19 @@
 import numpy as np
 from collections import defaultdict
-from skimage.measure import label
+from skimage.draw import (
+    ellipsoid,
+)
+from skimage.measure import (
+    label,
+    marching_cubes,
+)
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import PolynomialFeatures
 from scipy.stats import skew
+
+from ..util._image import (
+    _distance,
+)
 
 
 def sholl_analysis(
@@ -98,26 +108,54 @@ def _concentric_coords_and_values(
     # n_intersections: {radius values: n_intersection values}
 
     # {100: [(10,10), ..] , 400: [(20,20), ..]}
-    concentric_coordinates = defaultdict(list)
-    concentric_coordinates_intensities = defaultdict(list)
-    concentric_radiuses = [
+    concentric_coords = defaultdict(list)
+    concentric_coords_intensities = defaultdict(list)
+    concentric_radii = [
         radius for radius in range(shell_step_size,
                                    largest_radius, shell_step_size)]
 
-    for (x, y), value in np.ndenumerate(padded_skeleton):
-        for radius in concentric_radiuses:
-            lhs = (x - pad_sk_soma[0])**2 + (y - pad_sk_soma[1])**2
-            if abs((np.sqrt(lhs)-radius)) < 0.9:
-                concentric_coordinates[radius].append((x, y))
-                concentric_coordinates_intensities[radius].append(value)
+    if padded_skeleton.ndim == 2:
+        for pt, value in np.ndenumerate(padded_skeleton):
+            for radius in concentric_radii:
+                lhs = _distance(pt, pad_sk_soma)
+                if abs(lhs - radius) < 0.9:
+                    concentric_coords[radius].append(pt)
+                    concentric_coords_intensities[radius].append(value)
+    else:
+        for i, radius in enumerate(concentric_radii):
+            el = ellipsoid(radius, radius, radius)
+            center = tuple(map(lambda d: d//2, el.shape))
+
+            vertse, facese, normalse, valuese = marching_cubes(el)
+
+            sholl_sphere = vertse + i * shell_step_size + pad_sk_soma - (
+                np.array(center) + i * shell_step_size)
+
+            ball = np.zeros_like(padded_skeleton, dtype=int)
+            bshp = ball.shape
+            for j in sholl_sphere:
+                pt = tuple(map(int, j))
+
+                if (
+                    pt[0] < bshp[0] and pt[1] < bshp[1] and pt[2] < bshp[2]
+                    and pt[0] > 0 and pt[1] > 0 and pt[2] > 0
+                ):
+                    ball[pt] = 1
+
+            intersections_mask = ball * padded_skeleton
+            intersections_coords = np.argwhere(intersections_mask)
+            for coord in intersections_coords:
+                pt = tuple(coord)
+                concentric_coords[radius].append(pt)
+                concentric_coords_intensities[radius].append(len(intersections_coords))
 
     # array with intersection values corresponding to radii
     n_intersections = defaultdict()
-    for radius, val in concentric_coordinates_intensities.items():
+    for radius, val in concentric_coords_intensities.items():
         intersec_indicies = []
         indexes = [i for i, x in enumerate(val) if x]
         for index in indexes:
-            intersec_indicies.append(concentric_coordinates[radius][index])
+            intersec_indicies.append(concentric_coords[radius][index])
         img = np.zeros(padded_skeleton.shape)
 
         for index in intersec_indicies:
@@ -125,7 +163,7 @@ def _concentric_coords_and_values(
         label_image = label(img)
         n_intersections[radius] = np.amax(label_image)
 
-    return concentric_coordinates, n_intersections
+    return concentric_coords, n_intersections
 
 
 def get_intersections(
@@ -144,7 +182,11 @@ def get_intersections(
         ys.append(val)
     order = np.argsort(xs)
 
-    return concentric_coords, np.array(xs)[order], np.array(ys)[order]
+    return (
+        concentric_coords,
+        np.array(xs)[order],
+        np.array(ys)[order]
+    )
 
 
 def polynomial_fit(polynomial_degree, radii, n_intersections):

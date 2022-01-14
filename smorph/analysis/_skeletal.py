@@ -6,6 +6,10 @@ from skimage.feature import blob_log
 from skimage.morphology import convex_hull_image
 from skimage.util import invert
 
+from ..util._image import (
+    _distance
+)
+
 
 def _get_blobs(cell_image, image_type):
     """Extracts circular blobs in cell image for finding soma later.
@@ -77,11 +81,15 @@ def _centre_of_mass(blobs, cell_image, image_type):
     ixs = np.indices(cell_image.shape)
 
     n_blobs = blobs.shape[0]
-    blob_centres = blobs[:, 0:2]
-    blob_radii = blobs[:, 2]
+    blob_centres = blobs[:, 0:cell_image.ndim]
+    blob_radii = blobs[:, cell_image.ndim]
 
     centres = blob_centres[..., np.newaxis, np.newaxis]
     radii = np.square(blob_radii)[:, np.newaxis, np.newaxis]
+    if cell_image.ndim == 3:
+        centres = centres[..., np.newaxis]
+        radii = radii[..., np.newaxis]
+
     # Using the formula for a circle, `x**2 + y**2 < r**2`,
     # generate a mask for all blobs.
     mask = np.square(ixs - centres).sum(axis=1) < radii
@@ -115,7 +123,7 @@ def _get_soma(cell_image, image_type):
     if len(soma_blobs) == 0:
         raise RuntimeError('No soma detected for the cell!')
     if len(soma_blobs) == 1:
-        soma = soma_blobs[0][:2]
+        soma = soma_blobs[0][:cell_image.ndim]
     if len(soma_blobs) > 1:
         soma = _centre_of_mass(soma_blobs, cell_image, image_type)
 
@@ -126,29 +134,35 @@ def get_surface_area(cleaned_image_filled_holes):
     return np.sum(cleaned_image_filled_holes)
 
 
-def _distance(P1, P2):
-    """Finds the Euclidian distance between two pixel positions."""
-    return ((P1[0] - P2[0])**2 + (P1[1] - P2[1])**2) ** 0.5
-
-
 def pad_skeleton(cell_skeleton, soma_on_skeleton):
     """Adds padding to cell skeleton image."""
     # get all the pixel indices representing skeleton
     skeleton_indices = np.nonzero(cell_skeleton)
 
     # get corner points enclosing skeleton
-    x_min, x_max = min(skeleton_indices[1]), max(skeleton_indices[1]) + 1
-    y_min, y_max = min(skeleton_indices[0]), max(skeleton_indices[0]) + 1
-    bounded_skeleton = cell_skeleton[y_min:y_max, x_min:x_max]
+    if cell_skeleton.ndim == 2:
+        x_min, x_max = min(skeleton_indices[1]), max(skeleton_indices[1]) + 1
+        y_min, y_max = min(skeleton_indices[0]), max(skeleton_indices[0]) + 1
+        bounded_skeleton = cell_skeleton[y_min:y_max, x_min:x_max]
+    else:
+        z_min, z_max = min(skeleton_indices[0]), max(skeleton_indices[0]) + 1
+        y_min, y_max = min(skeleton_indices[1]), max(skeleton_indices[1]) + 1
+        x_min, x_max = min(skeleton_indices[2]), max(skeleton_indices[2]) + 1
+        bounded_skeleton = cell_skeleton[z_min:z_max, y_min:y_max, x_min:x_max]
 
     pad_width = max(bounded_skeleton.shape)//2
-    bounded_skeleton_boundary = [x_min, x_max, y_min, y_max]
+    nd_soma_on_skeleton = np.array(soma_on_skeleton)
+    if cell_skeleton.ndim == 2:    
+        bounded_skeleton_boundary = [x_min, x_max, y_min, y_max]
+        nd_min_bounds = np.array([y_min, x_min])
+    else:
+        bounded_skeleton_boundary = [x_min, x_max, y_min, y_max, z_min, z_max]
+        nd_min_bounds = np.array([z_min, y_min, x_min])
 
     # get updated soma position on bounded and padded skeleton
-    soma_on_bounded_skeleton = soma_on_skeleton[0] - \
-        y_min, soma_on_skeleton[1]-x_min
-    soma_on_padded_skeleton = soma_on_skeleton[0] - \
-        y_min+pad_width, soma_on_skeleton[1]-x_min+pad_width
+    soma_on_bounded_skeleton = tuple(nd_soma_on_skeleton - nd_min_bounds)
+    soma_on_padded_skeleton = tuple(
+        nd_soma_on_skeleton - nd_min_bounds + pad_width)
 
     return (
         np.pad(bounded_skeleton, pad_width=pad_width, mode='constant'),
@@ -206,8 +220,12 @@ def _eliminate_loops(branch_stats, paths_list):
 def get_soma_on_skeleton(cell_image, image_type, cell_skeleton):
     """Retrieves soma's position on cell skeleton."""
     soma = _get_soma(cell_image, image_type)
-    skeleton_pixel_coordinates = [(i, j) for (
-        i, j), val in np.ndenumerate(cell_skeleton) if val != 0]
+    if cell_image.ndim == 2:
+        skeleton_pixel_coordinates = [(i, j) for (
+            i, j), val in np.ndenumerate(cell_skeleton) if val != 0]
+    else:
+        skeleton_pixel_coordinates = [(i, j, k) for (
+            i, j, k), val in np.ndenumerate(cell_skeleton) if val != 0]
     soma_on_skeleton = min(skeleton_pixel_coordinates,
                            key=lambda x: _distance(soma, x))
 
@@ -215,7 +233,7 @@ def get_soma_on_skeleton(cell_image, image_type, cell_skeleton):
 
 
 def get_total_length(cell_skeleton):
-    return np.sum(cell_skeleton)
+    return np.sum(cell_skeleton.astype(np.bool))
 
 
 def get_avg_process_thickness(surface_area, total_length):
@@ -234,12 +252,16 @@ def get_no_of_forks(cell):
     degrees = skeleton_to_csgraph(cell.skeleton)[2]
     # array of all pixel locations with degree more than 2
     fork_image = np.where(degrees > [2], 1, 0)
-    s = generate_binary_structure(2, 2)
+    s = generate_binary_structure(cell.skeleton.ndim, 2)
     num_forks = label(fork_image, structure=s)[1]
 
     # for future plotting
     fork_indices = np.where(degrees > [2])
-    cell._fork_coords = zip(fork_indices[0], fork_indices[1])
+    if cell.skeleton.ndim == 2:
+        cell._fork_coords = zip(fork_indices[0], fork_indices[1])
+    else:
+        cell._fork_coords = zip(fork_indices[0], fork_indices[1],
+                                fork_indices[2])
 
     return num_forks
 
