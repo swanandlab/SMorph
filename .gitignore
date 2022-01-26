@@ -59,6 +59,7 @@ doc/_build/
 Datasets/
 Results/
 Autocropped/
+Cache/
 
 *.csv
 skipped_cells.txt
