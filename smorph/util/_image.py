@@ -30,21 +30,19 @@ THRESHOLD_METHODS = ('isodata', 'li', 'mean', 'minimum',
                      'otsu', 'triangle', 'yen')
 
 
-def _validate_img_args(crop_tech, contrast_ptiles, threshold_method):
+def _validate_img_args(segmented, contrast_ptiles, threshold_method):
     if (
-        (threshold_method is None)
-        and (crop_tech != 'auto')
-        and (contrast_ptiles == (0, 100))
+        (threshold_method == 0)
+        and (not segmented)
     ):
-        raise ValueError('`threshold_method` can be None only if images are '
-                         'autocropped & image isn\'t contrast stretched.')
+        raise ValueError('Threshold can be 0 only if images are segmented.')
 
-    threshold_method = (threshold_method.lower()
-                        if threshold_method is not None else threshold_method)
+    if isinstance(threshold_method, str):
+        threshold_method = threshold_method.lower()
 
     if (
         (threshold_method not in THRESHOLD_METHODS)
-        and threshold_method is not None
+        and not isinstance(threshold_method, (int, float, np.float))
     ):
         raise ValueError('`threshold_method` must be either of otsu, '
                          'isodata, li, mean, minimum, triangle, or yen')
@@ -60,7 +58,7 @@ def _validate_img_args(crop_tech, contrast_ptiles, threshold_method):
 
 
 def _contrast_stretching(img, contrast_ptiles):
-    """Stretches contrast of an image to a band of percentiles of intensities,
+    """Stretches contrast of an image to a band of intensity percentiles.
 
     Parameters
     ----------
@@ -75,7 +73,6 @@ def _contrast_stretching(img, contrast_ptiles):
     -------
     ndarray
         Contrast rescaled image data.
-
     """
     p_low, p_hi = np.percentile(img, contrast_ptiles)
     img_rescale = rescale_intensity(img, in_range=(p_low, p_hi))
@@ -95,7 +92,6 @@ def try_all_threshold(img, contrast_ptiles=(0, 100), figsize=(10, 6)):
         stretched, by default (0, 100)
     figsize : tuple, optional
         Figure size (in inches), by default (10, 6)
-
     """
     contrast_ptiles, _ = _validate_img_args('auto', contrast_ptiles, 'li')
     if len(img.shape) == 3 and img.shape[2] == 3:
@@ -108,9 +104,8 @@ def try_all_threshold(img, contrast_ptiles=(0, 100), figsize=(10, 6)):
 def preprocess_image(
     image,
     image_type,
-    scale,
     reference_image,
-    crop_tech='manual',
+    segmented=False,
     contrast_ptiles=(0, 100),
     threshold_method='otsu'
 ):
@@ -126,40 +121,36 @@ def preprocess_image(
     scale : int or tuple
     reference_image : ndarray
         `image` would be standardized to the exposure level of this example.
-    crop_tech : str
-        Technique used to crop cell from tissue image,
-        either 'manual' or 'auto', by default 'manual'.
+    segmented : bool
+        Cell image has removed background or not.
     contrast_ptiles : tuple of size 2, optional
         `(low_percentile, hi_percentile)` Contains ends of band of percentile
         values for pixel intensities to which the contrast of cell image
         would be stretched, by default (0, 100)
-    threshold_method : str or None, optional
+    threshold_method : str or float, optional
         Automatic single intensity thresholding method to be used for
         obtaining ROI from cell image either of 'otsu', 'isodata', 'li',
-        'mean', 'minimum', 'triangle', 'yen'. If None & crop_tech is 'auto' &
-        contrast stretch is (0, 100), a single intensity threshold of zero is
-        applied, by default 'otsu'
+        'mean', 'minimum', 'triangle', 'yen'.
 
     Returns
     -------
     ndarray
         Thresholded, denoised, boolean transformation of `image` with solid
         soma.
-
     """
-    contrast_ptiles, threshold_method = _validate_img_args(crop_tech,
+    contrast_ptiles, threshold_method = _validate_img_args(segmented,
                                                            contrast_ptiles,
                                                            threshold_method)
-    factor = np.array(scale) / min(scale)
 
-    image = rescale(image, factor)
+    # Intensity normalization
+    min_intensity, max_intensity = image.min(), image.max()
+    image = image.astype(np.float)
+    image = (image - min_intensity) / (max_intensity - min_intensity)
+
     thresholded_image = _threshold_image(image, image_type, reference_image,
-                                         crop_tech, contrast_ptiles,
-                                         threshold_method)
-    cleaned_image = (thresholded_image if crop_tech == 'auto'
-                     else _remove_small_object_noise(thresholded_image))
-    cleaned_image_filled_holes = (cleaned_image if crop_tech == 'auto'
-                                  else _fill_holes(cleaned_image))
+                                         contrast_ptiles, threshold_method)
+    cleaned_image = _remove_small_object_noise(thresholded_image)
+    cleaned_image_filled_holes = _fill_holes(cleaned_image)
 
     # Auto-contrast stretching aiding soma detection
     masked_image = cleaned_image_filled_holes * image
@@ -175,7 +166,6 @@ def _threshold_image(
     image,
     image_type,
     reference_image,
-    crop_tech,
     contrast_ptiles,
     method
 ):
@@ -192,8 +182,8 @@ def _threshold_image(
                          'mean': threshold_mean, 'minimum': threshold_minimum,
                          'triangle': threshold_triangle}
 
-    if crop_tech == 'auto' and contrast_ptiles == (0, 100) and method is None:
-        thresholded_cell = image > 0
+    if isinstance(method, (int, float, np.float)):
+        thresholded_cell = image > method
     else:
         thresholded_cell = img_rescale > THRESHOLD_METHODS[method](img_rescale)
 
@@ -203,9 +193,9 @@ def _threshold_image(
         return thresholded_cell
 
 
-def _label_objects(thresholded_image):
-    """Label connected regions of a `thresholded_image`."""
-    bw = closing(thresholded_image, square(1) if thresholded_image.ndim == 2 else cube(1))
+def _label_objects(imbinary):
+    """Label connected regions of a thresholded image."""
+    bw = closing(imbinary, square(1) if imbinary.ndim == 2 else cube(1))
     # label image regions
     labelled_image = label(bw, return_num=True)[0]
 
@@ -226,12 +216,16 @@ def _remove_small_object_noise(thresholded_image):
 
 def _fill_holes(cleaned_image):
     """Fill holes in a binary image."""
-    return binary_fill_holes(cleaned_image).astype(int)
+    filled_holes = None
+    if cleaned_image.ndim == 2:
+        filled_holes = binary_fill_holes(cleaned_image).astype(np.bool)
+    else:
+        filled_holes = closing(cleaned_image).astype(np.bool)
+    return filled_holes
 
 
 def _distance(P1, P2):
     """Finds the Euclidian distance between two pixel/voxel positions."""
-    distance = ((P1[0] - P2[0])**2 + (P1[1] - P2[1])**2) ** 0.5
-    if len(P1) == 3:
-        distance = (distance**2 + (P1[2] - P2[2])**2) ** 0.5
+    P1, P2 = np.asarray(P1), np.asarray(P2)
+    distance = np.linalg.norm(P1 - P2)
     return distance

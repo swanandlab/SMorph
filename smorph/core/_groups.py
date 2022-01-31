@@ -59,7 +59,7 @@ _ALL_FEATURE_NAMES = (
 def _analyze_cells(
     group_folders,
     img_type,
-    groups_crop_tech,
+    segmented,
     scale,
     contrast_ptiles,
     threshold_method,
@@ -77,26 +77,21 @@ def _analyze_cells(
     img_type : str
         Neuroimaging technique used to get image data of neuronal cell,
         either 'confocal' or 'DAB'.
-    groups_crop_tech : list
-        List of techniques used to crop each group's cell images from tissue
-        image, elements can be either 'manual' or 'auto', by default 'manual'
-        for all groups. (Assumes all images in a group are captured via the
-        same cropping technique)
+    segmented : bool
+        Cell images have removed background or not. (Assumes all images in a
+        group are captured via the same cropping technique)
     contrast_ptiles : tuple of size 2
         `(low_percentile, hi_percentile)` Contains ends of band of percentile
         values for pixel intensities to which the contrast of all cell images
         would be stretched.
-    threshold_method : str or None, optional
-        Automatic single intensity thresholding method to be used for
-        obtaining ROI from cell images either of 'otsu', 'isodata', 'li',
-        'mean', 'minimum', 'triangle', 'yen'. If None & crop_tech is 'auto' &
-        contrast stretch is (0, 100), a single intensity threshold of zero is
-        applied, by default 'otsu'
+    threshold_method : str or float, optional
+        Manual or automatic single intensity thresholding method to be used
+        for segmenting cell images either of 'otsu', 'isodata', 'li', 'mean',
+        'minimum', 'triangle', 'yen'.
     sholl_step_sz : int
-        Difference (in pixels) between concentric Sholl circles, by default 3
-    poly_degree : int, optional
-        Degree of polynomial for fitting regression model on Sholl values, by
-        default 3
+        Difference (in pixels) between concentric Sholl circles.
+    poly_degree : int
+        Degree of polynomial for fitting regression model on Sholl values.
     save_results : bool
         To save the features into a file.
     show_logs : bool
@@ -135,12 +130,6 @@ def _analyze_cells(
     cell_cnt = 0
     N_GROUPS = len(group_folders)
 
-    if groups_crop_tech is None:
-        groups_crop_tech = ['manual' for i in range(N_GROUPS)]
-
-    if type(groups_crop_tech) == str:
-        groups_crop_tech = [groups_crop_tech for i in range(N_GROUPS)]
-
     silent_remove_file(SKIPPED_CELLS_FILENAME)
     # PROCESSED_DIR = 'Results/processed/'
     # mkdir(PROCESSED_DIR)
@@ -154,7 +143,7 @@ def _analyze_cells(
             cell_cnt += 1
             try:
                 cell = Cell(cell_image, img_type, scale,
-                            crop_tech=groups_crop_tech[group_no],
+                            segmented=segmented,
                             contrast_ptiles=contrast_ptiles,
                             threshold_method=threshold_method,
                             sholl_step_size=sholl_step_sz,
@@ -246,11 +235,9 @@ class Groups:
         Neuroimaging technique used to get image data of all cells,
         either 'confocal' or 'DAB'. This assumes that the group datasets are
         of homogeneous `image_type`.
-    groups_crop_tech : list or str
-        Representing techniques used to crop each group's cell images from
-        tissue image, elements can be either 'manual' or 'auto', by default
-        'manual' for all groups. (Assumes all images in a group are captured
-        via the same cropping technique)
+    segmented : bool
+        Cell images have removed background or not. (Assumes all images in a
+        group are captured via the same cropping technique)
     labels : dict or list
         Group labels to be used for visualization. Specify for each group.
     contrast_ptiles : tuple of size 2, optional
@@ -260,9 +247,7 @@ class Groups:
     threshold_method : str or None, optional
         Automatic single intensity thresholding method to be used for
         obtaining ROI from cell images either of 'otsu', 'isodata', 'li',
-        'mean', 'minimum', 'triangle', 'yen'. If None & crop_tech is 'auto' &
-        contrast stretch is (0, 100), a single intensity threshold of zero is
-        applied, by default 'otsu'
+        'mean', 'minimum', 'triangle', 'yen'.
     sholl_step_size : int, optional
         Difference (in pixels) between concentric Sholl circles, by default 3
     polynomial_degree : int, optional
@@ -313,8 +298,8 @@ class Groups:
         self,
         group_folders,
         image_type,
-        groups_crop_tech,
-        labels,
+        segmented=False,
+        labels=None,
         scale=1,
         contrast_ptiles=(0, 100),
         threshold_method='otsu',
@@ -323,7 +308,8 @@ class Groups:
         save_results=True,
         show_logs=False
     ):
-        self.labels = labels
+        self.labels = list((labels if labels is not None
+                            else [path.basename(f) for f in group_folders]))
         self.sholl_step_size = sholl_step_size
         self.save = save_results
 
@@ -334,7 +320,7 @@ class Groups:
             self.sholl_polynomial_plots,
             self.group_counts,
             self.file_names
-        ) = _analyze_cells(group_folders, image_type, groups_crop_tech, scale,
+        ) = _analyze_cells(group_folders, image_type, segmented, scale,
                            contrast_ptiles, threshold_method, sholl_step_size,
                            polynomial_degree, save_results, show_logs)
 
@@ -485,6 +471,7 @@ class Groups:
         color_dict=None,
         markers=None,
         on_features=None,
+        only_ellipse=False,
         save_results=True
     ):
         """Principal Component Analysis of morphological features of cells.
@@ -617,7 +604,8 @@ class Groups:
                 mean_PC_2 = np.mean(PC_2[ix])
                 cov = np.cov(PC_1, PC_2)
                 ax.scatter(PC_1[ix], PC_2[ix], c=color_dict[l], s=40,
-                           label=labels[l], marker=markers[l])
+                           label=labels[l], marker=markers[l],
+                           alpha=0 if only_ellipse else .25)
                 e = get_cov_ellipse(cov, (mean_PC_1, mean_PC_2),
                                     n_std, fc=color_dict[l], alpha=0.4)
                 ax.add_artist(e)
@@ -1209,13 +1197,14 @@ class Groups:
         # transform data
         projected = lda_object.transform(X)
         lda_plot = None
+        n_clusters = len(lda_object.classes_)
 
         def visualize_two_components():
             C_1 = projected[:, 0]
             C_2 = projected[:, 1]
 
             l_idx = r_idx = 0
-            LABEL_COLOR_MAP = color_palette(None, n_components)
+            LABEL_COLOR_MAP = color_palette(None, n_clusters)
             label_color = [LABEL_COLOR_MAP[l] for l in cluster_labels]
             group_cnts = self.group_counts.copy()
 

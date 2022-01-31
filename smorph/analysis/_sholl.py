@@ -1,5 +1,8 @@
 import numpy as np
+import skan
+import matplotlib.pyplot as plt
 from collections import defaultdict
+from scipy.spatial import distance_matrix
 from skimage.draw import (
     ellipsoid,
 )
@@ -19,13 +22,14 @@ from ..util._image import (
 def sholl_analysis(
     shell_step_size,
     polynomial_degree,
-    largest_radius,
-    padded_skeleton,
-    pad_sk_soma,
-    n_primary_branches
+    n_primary_branches,
+    cell
 ):
-    concentric_coords, radii, n_intersections = get_intersections(
-        shell_step_size, padded_skeleton, pad_sk_soma, largest_radius)
+    padded_skeleton = cell._padded_skeleton
+    pad_sk_soma = cell._pad_sk_soma
+    concentric_coords = None
+    radii, n_intersections = get_intersections(
+        shell_step_size, padded_skeleton, pad_sk_soma, cell)[-2:]
 
     (
         polynomial_model,
@@ -166,27 +170,127 @@ def _concentric_coords_and_values(
     return concentric_coords, n_intersections
 
 
+def _path_distances(skeleton, center_point, path_id):
+    """Compute real world distances of specific skeleton path coordinates
+    from the center point.
+
+    Parameters
+    ----------
+    skeleton : skan.csr.Skeleton
+        A Skeleton object.
+    center_point : array
+        Real world coordinates of center.
+    path_id : int
+        Path ID of path to be traversed.
+
+    Returns
+    -------
+    ndarray
+        Distance from each pixel in the path to the central pixel in real
+        world units.
+    """
+    path = skeleton.path_coordinates(path_id)
+    path_scaled = path * skeleton.spacing
+    distances = np.ravel(distance_matrix(path_scaled, [center_point]))
+    return distances
+
+
 def get_intersections(
     shell_step_size,
     padded_skeleton,
     pad_sk_soma,
-    largest_radius
+    cell,
+    old=False
 ):
-    # return sholl radii and corresponding intersection values
-    xs, ys = [], []
-    concentric_coords, n_intersections = _concentric_coords_and_values(
-        shell_step_size, padded_skeleton,
-        pad_sk_soma, largest_radius)
-    for rad, val in n_intersections.items():
-        xs.append(rad)
-        ys.append(val)
-    order = np.argsort(xs)
+    """Sholl Analysis for Skeleton object.
 
-    return (
-        concentric_coords,
-        np.array(xs)[order],
-        np.array(ys)[order]
-    )
+    Parameters
+    ----------
+    skeleton : skan.csr.Skeleton
+        A Skeleton object.
+    center : array-like of float or None, optional
+        Pixel coordinates of a point on the skeleton to use as the center
+        from which the concentric shells are computed. If None, the
+        geodesic center of skeleton is chosen.
+    shells : int or array of floats or None, optional
+        If an int, it is used as number of evenly spaced concentric shells. If
+        an array of floats, it is used directly as the different shell radii in
+        real world units. If None, the number of evenly spaced concentric
+        shells is automatically calculated.
+
+    Returns
+    -------
+    array
+        Radii in real world units for concentric shells used for analysis.
+    array
+        Number of intersections for corresponding shell radii.
+    """
+    scale = np.asarray(cell.scale)
+    skeleton = cell._skeleton
+    center = np.asarray(cell.skel_soma)
+
+    scaled_center = center * scale
+
+    leaf_node_val = 1
+    leaf_nodes_mask = np.argwhere(skeleton.degrees == leaf_node_val)
+    leaf_nodes = np.squeeze(skeleton.coordinates[leaf_nodes_mask])
+    leaf_to_center_vec = leaf_nodes - center
+    leaf_to_center_px = np.linalg.norm(leaf_to_center_vec, axis=1)
+    leaf_to_center_real = np.linalg.norm(
+            leaf_to_center_vec * scale, axis=1
+            )
+
+    end_radius = np.max(leaf_to_center_real)  # largest possible radius
+
+    if old:
+        center = np.asarray(pad_sk_soma)
+        # return sholl radii and corresponding intersection values
+        xs, ys = [], []
+        concentric_coords, n_intersections = _concentric_coords_and_values(
+            shell_step_size, padded_skeleton,
+            pad_sk_soma, end_radius)
+        for rad, val in n_intersections.items():
+            xs.append(rad)
+            ys.append(val)
+        order = np.argsort(xs)
+
+        return (
+            np.asarray(xs)[order],
+            np.asarray(ys)[order]
+        )
+
+    shell_radii = np.arange(
+        shell_step_size, end_radius+shell_step_size, shell_step_size)
+
+    # width = np.linalg.norm(scale) / 2
+    # shell_bins = [(r-width, r+width) for r in shell_radii]
+
+    intersection_counts = np.zeros_like(shell_radii)
+
+    for i in range(skeleton.n_paths):
+        # Find distances of the path pixels
+        distances = _path_distances(skeleton, scaled_center, i)
+
+        # # Find which shell bin each pixel sits in
+        # for j in range(len(shell_bins)):
+        #     mn, mx = shell_bins[j]
+        #     for distance in distances:
+        #         if mn <= distance < mx:
+        #             intersection_counts[j] += 1
+        #             break
+
+        # Find which shell bin each pixel sits in
+        shell_location = np.digitize(distances, shell_radii)
+
+        # Use np.diff to find where bins are crossed.
+        crossings = shell_location[
+            np.flatnonzero(np.diff(shell_location))]
+
+        # increment corresponding crossings
+        intersection_counts[crossings] += 1
+
+    # print(shell_radii, intersection_counts)
+    return shell_radii, intersection_counts
 
 
 def polynomial_fit(polynomial_degree, radii, n_intersections):
@@ -233,7 +337,7 @@ def get_critical_radius(non_zero_radii, predicted_n_intersections):
 
 def get_critical_value(predicted_n_intersections):
     # local maximum of the polynomial fit (Maximum no. of intersections)
-    return round(np.max(predicted_n_intersections), 2)
+    return np.max(predicted_n_intersections)
 
 
 def get_skewness(
@@ -245,13 +349,13 @@ def get_skewness(
     reshaped_x = non_zero_n_intersections.reshape((-1, 1))
     x_ = PolynomialFeatures(
         degree=polynomial_degree, include_bias=False).fit_transform(reshaped_x)
-    return round(skew(polynomial_model.predict(x_)), 2)
+    return skew(polynomial_model.predict(x_))
 
 
 def get_schoenen_ramification_index(critical_value, n_primary_branches):
     # ratio between critical value and number of primary branches
     schoenen_ramification_index = critical_value / n_primary_branches
-    return round(schoenen_ramification_index, 2)
+    return schoenen_ramification_index
 
 
 def _semi_log(non_zero_n_intersections, non_zero_radii):
@@ -295,9 +399,8 @@ def get_coefficient_of_determination(norm_mthd, semi_log_r2, log_log_r2):
     # how close the data are to the fitted regression (indicative of the level
     # of explained variability in the data set)
     if norm_mthd == "Semi-log":
-        return round(semi_log_r2, 2)
-    else:
-        return round(log_log_r2, 2)
+        return semi_log_r2
+    return log_log_r2
 
 
 def get_regression_intercept(
@@ -307,9 +410,8 @@ def get_regression_intercept(
 ):
     # Y intercept of the logarithmic plot
     if norm_mthd == "Semi-log":
-        return round(semi_log_regression_intercept, 2)
-    else:
-        return round(log_log_regression_intercept, 2)
+        return semi_log_regression_intercept
+    return log_log_regression_intercept
 
 
 def get_sholl_regression_coeff(
@@ -319,6 +421,5 @@ def get_sholl_regression_coeff(
 ):
     """Rate of decay of no. of branches."""
     if norm_mthd == "Semi-log":
-        return round(semi_log_regression_coeff, 2)
-    else:
-        return round(log_log_regression_coeff, 2)
+        return semi_log_regression_coeff
+    return log_log_regression_coeff

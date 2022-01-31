@@ -25,19 +25,16 @@ class Cell:
     image_type : str
         Neuroimaging technique used to get image data of neuronal cell,
         either 'confocal' or 'DAB'.
-    crop_tech : str
-        Technique used to crop cell from tissue image,
-        either 'manual' or 'auto', by default 'manual'.
+    segmented : bool
+        Cell image has removed background or not.
     contrast_ptiles : tuple of size 2, optional
         `(low_percentile, hi_percentile)` Contains ends of band of percentile
         values for pixel intensities to which the contrast of cell image
         would be stretched, by default (0, 100)
-    threshold_method : str or None, optional
-        Automatic single intensity thresholding method to be used for
-        obtaining ROI from cell image either of 'otsu', 'isodata', 'li',
-        'mean', 'minimum', 'triangle', 'yen'. If None & crop_tech is 'auto' &
-        contrast stretch is (0, 100), a single intensity threshold of zero is
-        applied, by default 'otsu'
+    threshold_method : str or float, optional
+        Manual or automatic single intensity thresholding method to be used
+        for segmenting cell images either of 'otsu', 'isodata', 'li', 'mean',
+        'minimum', 'triangle', 'yen'.
     reference_image : ndarray
         `image` would be standardized to the exposure level of this example.
     sholl_step_size : int, optional
@@ -70,14 +67,14 @@ class Cell:
                  '_branch_coords', '_branching_struct', '_concentric_coords',
                  '_sholl_intersections', '_padded_skeleton', '_pad_sk_soma',
                  '_sholl_polynomial_model', '_polynomial_sholl_radii',
-                 '_non_zero_sholl_intersections')
+                 '_non_zero_sholl_intersections', '_skeleton', 'skel_soma')
 
     def __init__(
         self,
         cell_image,
         image_type,
         scale=1,
-        crop_tech='manual',
+        segmented=False,
         contrast_ptiles=(0, 100),
         threshold_method='otsu',
         reference_image=None,
@@ -91,7 +88,7 @@ class Cell:
         self.scale = scale
         self.sholl_step_size = sholl_step_size
         self.image, self.cleaned_image = preprocess_image(
-            image, image_type, scale, reference_image, crop_tech,
+            image, image_type, reference_image, segmented,
             contrast_ptiles, threshold_method)
         self.features = _extract_cell_features(
             self, sholl_step_size, polynomial_degree)

@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.ndimage import generate_binary_structure, label
 from skan import skeleton_to_csgraph
-from skan.csr import Skeleton, branch_statistics
+from skan.csr import branch_statistics
 from skimage.feature import blob_log
 from skimage.morphology import convex_hull_image
 from skimage.util import invert
@@ -117,7 +117,6 @@ def _centre_of_mass(blobs, cell_image, image_type):
 
 def _get_soma(cell_image, image_type):
     """Calculate pixel position to be attribute as soma."""
-
     soma_blobs = _get_blobs(cell_image, image_type)
 
     if len(soma_blobs) == 0:
@@ -130,8 +129,11 @@ def _get_soma(cell_image, image_type):
     return soma
 
 
-def get_surface_area(cleaned_image_filled_holes):
-    return np.sum(cleaned_image_filled_holes)
+def get_surface_area(im, scale):
+    real_unit = np.prod(scale)
+    npixels = np.sum(im)
+    area = npixels * real_unit
+    return area
 
 
 def pad_skeleton(cell_skeleton, soma_on_skeleton):
@@ -152,11 +154,9 @@ def pad_skeleton(cell_skeleton, soma_on_skeleton):
 
     pad_width = max(bounded_skeleton.shape)//2
     nd_soma_on_skeleton = np.array(soma_on_skeleton)
-    if cell_skeleton.ndim == 2:    
-        bounded_skeleton_boundary = [x_min, x_max, y_min, y_max]
+    if cell_skeleton.ndim == 2:
         nd_min_bounds = np.array([y_min, x_min])
     else:
-        bounded_skeleton_boundary = [x_min, x_max, y_min, y_max, z_min, z_max]
         nd_min_bounds = np.array([z_min, y_min, x_min])
 
     # get updated soma position on bounded and padded skeleton
@@ -167,7 +167,6 @@ def pad_skeleton(cell_skeleton, soma_on_skeleton):
     return (
         np.pad(bounded_skeleton, pad_width=pad_width, mode='constant'),
         soma_on_padded_skeleton,
-        bounded_skeleton_boundary,
         soma_on_bounded_skeleton
     )
 
@@ -232,19 +231,27 @@ def get_soma_on_skeleton(cell_image, image_type, cell_skeleton):
     return soma_on_skeleton
 
 
-def get_total_length(cell_skeleton):
-    return np.sum(cell_skeleton.astype(np.bool))
+def get_total_length(skel):
+    """Returns total length of skeleton in real world units.
+
+    Parameters
+    ----------
+    skel : skan.csr.Skeleton
+        A Skeleton object.
+    """
+    lengths = skel.path_lengths()
+    return np.sum(lengths)
 
 
 def get_avg_process_thickness(surface_area, total_length):
-    return round(surface_area / total_length, 1)
+    return surface_area / total_length
 
 
 def get_convex_hull(cell):
     convex_hull = convex_hull_image(cell.skeleton)
     cell.convex_hull = convex_hull
 
-    return np.sum(convex_hull)
+    return np.sum(convex_hull) * np.prod(cell.scale)
 
 
 def get_no_of_forks(cell):
@@ -306,13 +313,13 @@ def _branch_structure(junctions, branch_stats, paths_list):
     return next_set_junctions, next_set_branches, term_branches, branch_stats
 
 
-def classify_branching_structure(cell_skeleton, soma_on_skeleton):
+def classify_branching_structure(cell, soma_on_skeleton):
+    skel_obj = cell._skeleton
 
     def _get_soma_node():
         near = []
-        for i in range(Skeleton(cell_skeleton).n_paths):
-            path_coords = Skeleton(
-                cell_skeleton).path_coordinates(i)
+        for i in range(skel_obj.n_paths):
+            path_coords = skel_obj.path_coordinates(i)
             nearest = min(path_coords, key=lambda x: _distance(
                 soma_on_skeleton, x))
             near.append(nearest)
@@ -320,7 +327,7 @@ def classify_branching_structure(cell_skeleton, soma_on_skeleton):
         soma_on_path = min(near, key=lambda x: _distance(
             soma_on_skeleton, x))
 
-        for i, j in enumerate(Skeleton(cell_skeleton).coordinates):
+        for i, j in enumerate(skel_obj.coordinates):
             if all(soma_on_path == j):
                 soma_node = [i]
                 break
@@ -334,9 +341,9 @@ def classify_branching_structure(cell_skeleton, soma_on_skeleton):
                 soma_branches.append(path)
         return soma_branches
 
-    pixel_graph, coords = skeleton_to_csgraph(cell_skeleton)[0:2]
+    pixel_graph, coords = skeleton_to_csgraph(cell.skeleton)[0:2]
     branch_stats = branch_statistics(pixel_graph)
-    paths_list = Skeleton(cell_skeleton).paths_list()
+    paths_list = skel_obj.paths_list()
 
     terminal_branches = []
     branching_structure_array = []
@@ -375,7 +382,7 @@ def get_primary_branches(branching_struct):
     avg_len_of_prim_branches = 0 if n_prim_branches == 0 else sum(
         map(len, prim_branches))/float(len(prim_branches))
 
-    return n_prim_branches, round(avg_len_of_prim_branches, 1)
+    return n_prim_branches, avg_len_of_prim_branches
 
 
 def get_secondary_branches(branching_struct):
@@ -385,7 +392,7 @@ def get_secondary_branches(branching_struct):
     avg_len_of_sec_branches = 0 if n_sec_branches == 0 else sum(
         map(len, sec_branches))/float(len(sec_branches))
 
-    return n_sec_branches, round(avg_len_of_sec_branches, 1)
+    return n_sec_branches, avg_len_of_sec_branches
 
 
 def get_tertiary_branches(branching_struct):
@@ -395,7 +402,7 @@ def get_tertiary_branches(branching_struct):
     avg_len_of_tert_branches = 0 if n_tert_branches == 0 else sum(
         map(len, tert_branches))/float(len(tert_branches))
 
-    return n_tert_branches, round(avg_len_of_tert_branches, 1)
+    return n_tert_branches, avg_len_of_tert_branches
 
 
 def get_quatenary_branches(branching_struct):
@@ -407,7 +414,7 @@ def get_quatenary_branches(branching_struct):
     avg_len_of_quat_branches = 0 if n_quat_branches == 0 else sum(
         map(len, quat_branches))/float(len(quat_branches))
 
-    return n_quat_branches, round(avg_len_of_quat_branches, 1)
+    return n_quat_branches, avg_len_of_quat_branches
 
 
 def get_terminal_branches(term_branches):
@@ -415,4 +422,4 @@ def get_terminal_branches(term_branches):
     avg_len_of_term_branches = 0 if n_term_branches == 0 else sum(
         map(len, term_branches))/float(len(term_branches))
 
-    return n_term_branches, round(avg_len_of_term_branches, 1)
+    return n_term_branches, avg_len_of_term_branches
