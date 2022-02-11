@@ -43,7 +43,8 @@ def _extract_cell_features(cell, shell_step_size, polynomial_degree):
     surface_area = get_surface_area(cleaned_image, cell.scale)
 
     cell_skeleton = skeletonize(cleaned_image)
-    cell._skeleton = Skeleton(cell_skeleton, spacing=cell.scale)
+    cell._skeleton = Skeleton(cell_skeleton, spacing=cell.scale,
+                              unique_junctions=True)
     cell.skeleton = cell._skeleton.skeleton_image
 
     # Skeletal features

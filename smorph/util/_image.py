@@ -222,10 +222,3 @@ def _fill_holes(cleaned_image):
     else:
         filled_holes = closing(cleaned_image).astype(np.bool)
     return filled_holes
-
-
-def _distance(P1, P2):
-    """Finds the Euclidian distance between two pixel/voxel positions."""
-    P1, P2 = np.asarray(P1), np.asarray(P2)
-    distance = np.linalg.norm(P1 - P2)
-    return distance

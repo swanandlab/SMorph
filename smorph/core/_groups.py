@@ -11,10 +11,16 @@ import seaborn as sns
 from matplotlib.colors import BASE_COLORS, CSS4_COLORS
 from matplotlib.lines import Line2D
 from matplotlib.offsetbox import AnnotationBbox, OffsetImage
-from matplotlib.patches import Ellipse
+from matplotlib.patches import Circle, Ellipse
 from pandas import DataFrame
 from pandas.plotting import parallel_coordinates, scatter_matrix
-from scipy.stats import sem, ttest_ind
+from skan import draw
+from scipy.stats import (
+    levene,
+    sem,
+    shapiro,
+    ttest_ind,
+)
 from seaborn import color_palette
 from statannotations.Annotator import Annotator
 from sklearn import decomposition, metrics, preprocessing
@@ -66,7 +72,9 @@ def _analyze_cells(
     sholl_step_sz,
     poly_degree,
     save_results,
-    show_logs
+    show_logs,
+    fig_format,
+    labels
 ):
     """Performs complete reading &thre feature extraction for groups of cells.
 
@@ -163,7 +171,14 @@ def _analyze_cells(
                 for feature in cell_features:
                     if feature is None:
                         raise RuntimeError('Illegal morphological '
-                                           'features extracted!')
+                                            'features extracted!')
+
+                AREA_CUTOFF = 0
+                LENGTH_CUTOFF = 0
+                if cell.features['surface_area'] < AREA_CUTOFF:
+                    raise ValueError('Cell area/volume below cutoff')
+                if cell.features['total_length'] < LENGTH_CUTOFF:
+                    raise ValueError('Cell length below cutoff')
 
                 group_cell_cnt += 1
 
@@ -183,12 +198,51 @@ def _analyze_cells(
                     im_name = DIR + folder + '/' + '.'.join(file_names[
                         cell_cnt-1].split('/')[-1].split('.')[:-1])
                     if cell.image.ndim == 2:
-                        plt.imshow(cell.image, cmap='gray')
+                        fig, ax = plt.subplots(figsize=(8, 8))
+                        ax.imshow(cell.image, cmap='gray')
+
                         idx = np.array([(i, j) for (i, j), val in np.ndenumerate(
                             cell.skeleton) if val != 0])
-                        plt.plot(idx[:, 1], idx[:, 0], 'r.', alpha=.5)
-                        plt.savefig(im_name + '.png')
-                        plt.clf()
+                        ax.plot(idx[:,1], idx[:,0], 'y.', alpha=.5)
+
+                        colors = ['red', 'blue', 'magenta', 'green', 'cyan']
+
+                        branching_structure = cell._branching_struct
+                        coords = cell._branch_coords
+                        # store same level branch nodes in single array
+                        color_branches_coords = []
+                        for branch_level in branching_structure:
+                            single_branch_level = []
+                            for path in branch_level:
+                                path_coords = []
+                                for node in path:
+                                    path_coords.append(coords[node])
+                                    single_branch_level.extend(path_coords)
+                            color_branches_coords.append(single_branch_level)
+
+                        for j, color_branch in enumerate(color_branches_coords):
+                            if j > 4:
+                                j = 4
+                            for k in color_branch:
+                                c = plt.Circle((k[1], k[0]), 0.5, color=colors[j])
+                                ax.add_patch(c)
+
+                        # draw.overlay_skeleton_networkx(
+                        #     cell._skeleton.graph, cell._skeleton.coordinates, axis=ax)
+                        ax.plot(cell.skel_soma[1],
+                                 cell.skel_soma[0], 'b.', alpha=.5)
+
+                        radius = cell.sholl_step_size/scale[-1]
+                        intersections = cell._sholl_intersections
+                        radii = np.arange(radius,
+                            (len(intersections)+1)*radius, radius)
+                        circles = [Circle(cell.skel_soma[::-1], radius=r, alpha=.5,
+                            fill=False, edgecolor='cornflowerblue') for r in radii]
+                        for c in circles:
+                            ax.add_patch(c)
+                        ax.axis("off")
+                        fig.savefig(f'{im_name}.png')
+                        plt.close(fig)
             except Exception as err:
                 bad_cells_idx.append(cell_cnt - 1)
                 print('Warning: Skipping analysis of',
@@ -200,15 +254,22 @@ def _analyze_cells(
         tmp_fnames = [cell_name for idx, cell_name in enumerate(file_names)
                       if idx not in bad_cells_idx][:sum(group_cnts)]
         features = DataFrame(dataset_features, columns=_ALL_FEATURE_NAMES)
+        all_labels = [labels[i] for i in range(len(group_cnts))
+                        for j in range(group_cnts[i])]
 
         if save_results:
             out_features = features.copy()
             out_features.insert(0, 'cell_image_file', tmp_fnames)
+            out_features.insert(0, 'label', all_labels)
             df_to_csv(out_features, FEATURES_DIR, FEATURES_FILE_NAME)
 
     file_names = [cell_name for idx, cell_name in enumerate(file_names)
                   if idx not in bad_cells_idx]
     features = DataFrame(dataset_features, columns=_ALL_FEATURE_NAMES)
+
+    if features.empty:
+        raise ValueError('No cells were analyzed successfully! Please check '
+                         'your input data.')
 
     if save_results:
         out_features = features.copy()
@@ -292,7 +353,7 @@ class Groups:
     __slots__ = ('features', 'targets', 'sholl_original_plots', 'labels',
                  'sholl_polynomial_plots', 'pca_feature_names', 'markers',
                  'feature_significance', 'file_names', 'group_counts',
-                 'projected', 'sholl_step_size', 'save', 'scale')
+                 'projected', 'sholl_step_size', 'save', 'scale', 'fig_format')
 
     def __init__(
         self,
@@ -306,7 +367,8 @@ class Groups:
         sholl_step_size=3,
         polynomial_degree=3,
         save_results=True,
-        show_logs=False
+        show_logs=False,
+        fig_format='png'
     ):
         self.labels = list((labels if labels is not None
                             else [path.basename(f) for f in group_folders]))
@@ -322,11 +384,12 @@ class Groups:
             self.file_names
         ) = _analyze_cells(group_folders, image_type, segmented, scale,
                            contrast_ptiles, threshold_method, sholl_step_size,
-                           polynomial_degree, save_results, show_logs)
+                           polynomial_degree, save_results, show_logs, fig_format, self.labels)
 
         self.pca_feature_names = None
         self.markers = None
         self.feature_significance = None
+        self.fig_format = fig_format
 
     def plot_avg_sholl_plot(
         self,
@@ -357,12 +420,12 @@ class Groups:
         polynomial_plots = np.array([
             x+[0]*(len_polynomial_plots-len(x)) for x in polynomial_plots])
 
-        x = list(range(sholl_step_sz,
-                       sholl_step_sz * len_polynomial_plots + 1,
-                       sholl_step_sz))
+        x = np.arange(sholl_step_sz,
+            sholl_step_sz * (len_polynomial_plots + 1),
+            sholl_step_sz)
 
         lft_idx = 0
-        err_fn = np.std if min(group_cnts) > 150 else sem
+        err_fn = np.std if min(group_cnts) > 1e5 else sem
         print('Error-bars represent:', err_fn)
 
         for group_no, group_cnt in enumerate(group_cnts):
@@ -373,7 +436,7 @@ class Groups:
             plt.errorbar(x, y, yerr=e, label=labels[group_no], alpha=.8)
 
         if mark_avg_branch_lengths:
-            ALPHA = .27
+            ALPHA = .25
             branch_lengths = (
                 self.features[_ALL_FEATURE_NAMES[10]].mean(),
                 self.features[_ALL_FEATURE_NAMES[11]].mean(),
@@ -396,9 +459,9 @@ class Groups:
         plt.legend()
         fig = plt.gcf()
 
-        cols = list(range(sholl_step_sz,
-                          (len_polynomial_plots + 1) * sholl_step_sz,
-                          sholl_step_sz))
+        cols = np.arange(sholl_step_sz,
+            (len_polynomial_plots + 1) * sholl_step_sz,
+            sholl_step_sz)
 
         write_buffer = DataFrame(file_names, columns=['file_name'])
         df_polynomial_plots = DataFrame(polynomial_plots, columns=cols)
@@ -422,7 +485,7 @@ class Groups:
             DIR, OUTFILE = '/Results/', 'sholl_intersections.csv'
             df_to_csv(write_buffer, DIR, OUTFILE)
 
-            OUTPLOT = 'avg_sholl_plot.png'
+            OUTPLOT = f'avg_sholl_plot.{self.fig_format}'
             savefig(fig, DIR + OUTPLOT)
         
         y_height = plt.gca().get_ylim()[-1]
@@ -461,7 +524,7 @@ class Groups:
             ax.yaxis.label.set_ha('right')
 
         if self.save:
-            savefig(plt, '/Results/feature_scatter_matrix.png')
+            savefig(plt, f'/Results/feature_scatter_matrix.{self.fig_format}')
 
         plt.show()
 
@@ -626,8 +689,8 @@ class Groups:
             pca_values = DataFrame(data=projected, columns=PC_COLUMN_NAMES)
             df_to_csv(pca_values, DIR, 'pca_values.csv')
 
-            savefig(scree_plots, DIR + 'scree_plots.png')
-            savefig(two_PCs_plot, DIR + 'two_PCs_plot.png')
+            savefig(scree_plots, f'{DIR}scree_plots.{self.fig_format}')
+            savefig(two_PCs_plot, f'{DIR}two_PCs_plot.{self.fig_format}')
 
         self.feature_significance = feature_significance
         self.projected = projected
@@ -635,6 +698,53 @@ class Groups:
         covariance_matix = pca_object.get_covariance()
 
         return feature_significance, covariance_matix, var_PCs
+
+    def significance_tests(self, data, features=list(_ALL_FEATURE_NAMES)):
+        """Two-stage procedure
+        If the preliminary test for normality is not significant, the t test
+        is used; if the preliminary test rejects the null hypothesis of
+        normality, a nonparametric test is applied in the main analysis.
+
+        Procedure:
+        Shapiro-Wilk test for normality for each column individually.
+            1. If for all groups p-value >= .05, then distribution follows Gaussian (Success)
+                Perform Levine's test for checking equality of variances
+                1.a If p-value >= .05, then equal variance assumption is satisfied (Success)
+                    - Perform Student's t-test (independent t-test)
+                1.b Else (p-value < .05), then violation of the equal variance (Failure)
+                    - Perform Welch test for significance testing
+            2. If for any group p-value < .05, then distribution isn't Gaussian
+                - Perform Mann-Whitney's U test
+
+        References
+        ----------
+        .. [1] Rochon, J., Gondan, M. & Kieser, M. To test or not to test: Preliminary
+            assessment of normality when comparing two independent samples. BMC Med
+            Res Methodol 12, 81 (2012). https://doi.org/10.1186/1471-2288-12-81
+        """
+        pcutoff = .05
+        tests = []
+        for feature in features:
+            winner_test = None
+            feat_data = []
+            feat_normality_results = []
+
+            for label in self.labels:  # Normality test
+                feat_data.append(data[data['label'] == label][feature])
+                shapiro_test = shapiro(feat_data[-1])
+                feat_normality_results.append(shapiro_test.pvalue)
+
+            if np.all(np.asarray(feat_normality_results) >= pcutoff):  # 1
+                stat, p = levene(*feat_data)
+                if p >= pcutoff:
+                    winner_test = 't-test_ind'
+                else:
+                    winner_test = 't-test_welch'
+            else:
+                winner_test = 'Mann-Whitney'
+            tests.append(winner_test)
+        return tests
+
 
     def plot_feature_bar_swarm(self, features=list(_ALL_FEATURE_NAMES)):
         """Plots feature bar-swarm graphs for groups.
@@ -656,7 +766,7 @@ class Groups:
                          for j in range(self.group_counts[i])]
         ax = axes.ravel()  # flat axes with numpy ravel
         x = 'label'
-
+        tests = self.significance_tests(data, features)
         for i in range(len(features)):
             if min(self.group_counts) > 150:
                 sns.violinplot(y=features[i], x=x, data=data, ax=ax[i],
@@ -674,7 +784,7 @@ class Groups:
             if len(self.group_counts) == 2:
                 annotator = Annotator(ax[i], [self.labels], data=data, x=x,
                                     y=features[i])
-                annotator.configure(test='t-test_ind', text_format='star',
+                annotator.configure(test=tests[i], text_format='star',
                                     loc='outside')
                 annotator.apply_and_annotate()
 
@@ -683,7 +793,7 @@ class Groups:
         plt.tight_layout()
 
         if self.save:
-            savefig(plt, '/Results/feature_bar_swarm.png')
+            savefig(plt, f'/Results/feature_bar_swarm.{self.fig_format}')
 
         plt.show()
 
@@ -700,30 +810,39 @@ class Groups:
             raise ValueError('Given feature names must be a subset or equal to'
                              ' set of 23 Morphometric features.')
 
-        axes = plt.subplots((len(features)+1)//2, 2, figsize=(15, 12))[1]
-        data = self.features[features].to_numpy()
+        axes = plt.subplots((len(features)+1)//2, 2, figsize=(15, 20))[1]
+        # data = self.features[features].to_numpy()
 
-        ko = data[np.where(np.array(self.targets) == 0)[0]]
-        control = data[np.where(np.array(self.targets) == 1)[0]]
+        # ko = data[np.where(np.array(self.targets) == 0)[0]]
+        # control = data[np.where(np.array(self.targets) == 1)[0]]
+        l = []
+        for i in range(len(self.labels)):
+            l.extend(self.group_counts[i] * [self.labels[i]])
+        out_features = self.features.copy()
+        out_features.insert(0, 'group', l)
+
         ax = axes.ravel()  # flat axes with numpy ravel
 
         for i in range(len(features)):
-            bins = np.histogram(data[:, i], bins=40)[1]
-            # red color for malignant class
-            ax[i].hist(ko[:, i], bins=bins, color='r', alpha=.5)
-            # alpha is for transparency in the overlapped region
-            ax[i].hist(control[:, i], bins=bins, color='g', alpha=0.3)
-            ax[i].set_title(features[i], fontsize=9)
-            # x-axis co-ordinates aren't so useful, as we just want to
-            # look how well separated the histograms are
-            ax[i].axes.get_xaxis().set_visible(False)
-            ax[i].set_yticks(())
+            # bins = np.histogram(data[:, i], bins=40)[1]
+            # # red color for malignant class
+            # ax[i].hist(ko[:, i], bins=bins, color='r', alpha=.5)
+            # # alpha is for transparency in the overlapped region
+            # ax[i].hist(control[:, i], bins=bins, color='g', alpha=0.3)
+            # ax[i].set_title(features[i], fontsize=9)
+            # # x-axis co-ordinates aren't so useful, as we just want to
+            # # look how well separated the histograms are
+            # ax[i].axes.get_xaxis().set_visible(False)
+            # ax[i].set_yticks(())
+            sns.kdeplot(data=out_features, x=features[i], hue='group',
+                        fill=True, common_norm=False, linewidth=0, ax=ax[i],
+                        alpha=.5)
 
-        ax[0].legend(self.labels, loc='best', fontsize=8)
+        # ax[0].legend(self.labels, loc='best', fontsize=8)
         plt.tight_layout()
 
         if self.save:
-            savefig(plt, '/Results/feature_histograms.png')
+            savefig(plt, f'/Results/feature_histograms.{self.fig_format}')
 
         plt.show()
 
@@ -767,7 +886,7 @@ class Groups:
         plt.tight_layout()
 
         if self.save:
-            savefig(plt, '/Results/feature_significance_heatmap.png')
+            savefig(plt, f'/Results/feature_significance_heatmap.{self.fig_format}')
 
         plt.show()
 
@@ -805,7 +924,7 @@ class Groups:
         ax.set_ylabel('PC 2')
 
         if self.save:
-            savefig(plt, '/Results/feature_significance_vectors.png')
+            savefig(plt, f'/Results/feature_significance_vectors.{self.fig_format}')
 
         plt.show()
 
@@ -1071,7 +1190,7 @@ class Groups:
             df_to_csv(out, DIR, 'clustered_cells.csv')
             df_to_csv(dist, DIR, 'cluster_distribution.csv')
             if cluster_plot is not None:
-                savefig(cluster_plot, DIR + 'cluster_plot.png')
+                savefig(cluster_plot, f'{DIR}cluster_plot.{self.fig_format}')
 
         if label_metadata:
             for _, row in out.iterrows():
@@ -1233,7 +1352,7 @@ class Groups:
         visualize_two_components()
 
         if self.save and lda_plot is not None:
-            savefig(lda_plot, '/Results/lda_plot.png')
+            savefig(lda_plot, f'/Results/lda_plot.{self.fig_format}')
 
         # self.feature_significance = feature_significance
         # self.projected = projected

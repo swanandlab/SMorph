@@ -85,6 +85,8 @@ class Cell:
         if (cell_image.ndim == 3 and cell_image.shape[-1] == 3):
             image = rgb2gray(cell_image)
         self.image_type = image_type
+        if scale is None:
+            scale = tuple([1]*cell_image.ndim)
         self.scale = scale
         self.sholl_step_size = sholl_step_size
         self.image, self.cleaned_image = preprocess_image(
@@ -236,7 +238,7 @@ class Cell:
             plt.show()
 
             # plot sholl graph showing radius vs. n_intersections
-            plt.plot(range(radius,
+            plt.plot(np.arange(radius,
                         (len(sholl_intersections)+1)*radius,
                         radius),
                     sholl_intersections)
@@ -248,7 +250,7 @@ class Cell:
                 viewer = napari.view_labels(self._padded_skeleton, ndisplay=3)
                 viewer.add_points([self._pad_sk_soma], face_color=somacolor,
                                   size=1, symbol='ring', opacity=.25)
-                for r in range(radius, (len(sholl_intersections)+1)*radius, radius):
+                for r in np.arange(radius, (len(sholl_intersections)+1)*radius, radius):
                     el = ellipsoid(r, r, r)
                     center = np.array(tuple(map(lambda d: d//2, el.shape)))
                     vertse, facese, normalse, valuese = marching_cubes(el)

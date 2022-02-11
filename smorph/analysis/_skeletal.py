@@ -1,14 +1,11 @@
 import numpy as np
 from scipy.ndimage import generate_binary_structure, label
 from skan import skeleton_to_csgraph
-from skan.csr import branch_statistics
+from skan.csr import branch_statistics, make_degree_image
 from skimage.feature import blob_log
 from skimage.morphology import convex_hull_image
 from skimage.util import invert
-
-from ..util._image import (
-    _distance
-)
+from skimage.graph import central_pixel, pixel_graph
 
 
 def _get_blobs(cell_image, image_type):
@@ -171,15 +168,6 @@ def pad_skeleton(cell_skeleton, soma_on_skeleton):
     )
 
 
-def _cmp(branch, path):
-    return (
-        branch[0] == path[0]
-        and branch[1] == path[-1]
-        or branch[0] == path[-1]
-        and branch[1] == path[0]
-    )
-
-
 def _eliminate_loops(branch_stats, paths_list):
     """Eliminate loops in branches."""
     loop_indices = []
@@ -218,15 +206,20 @@ def _eliminate_loops(branch_stats, paths_list):
 
 def get_soma_on_skeleton(cell_image, image_type, cell_skeleton):
     """Retrieves soma's position on cell skeleton."""
-    soma = _get_soma(cell_image, image_type)
+    # soma = _get_soma(cell_image, image_type)
     if cell_image.ndim == 2:
-        skeleton_pixel_coordinates = [(i, j) for (
-            i, j), val in np.ndenumerate(cell_skeleton) if val != 0]
+        # skeleton_pixel_coordinates = [(i, j) for (
+        #     i, j), val in np.ndenumerate(cell_skeleton) if val != 0]
+        g, nodes = pixel_graph(cell_skeleton, connectivity=cell_image.ndim)
+        soma_on_skeleton, distances = central_pixel(
+            g, nodes=nodes, shape=cell_image.shape, partition_size=100)
     else:
+        soma = np.asarray(_get_soma(cell_image, image_type))
         skeleton_pixel_coordinates = [(i, j, k) for (
             i, j, k), val in np.ndenumerate(cell_skeleton) if val != 0]
-    soma_on_skeleton = min(skeleton_pixel_coordinates,
-                           key=lambda x: _distance(soma, x))
+        skeleton_pixel_coordinates = np.asarray(skeleton_pixel_coordinates)
+        amin = np.argmin(np.linalg.norm(skeleton_pixel_coordinates-soma, axis=1))
+        soma_on_skeleton = skeleton_pixel_coordinates[amin]
 
     return soma_on_skeleton
 
@@ -255,25 +248,48 @@ def get_convex_hull(cell):
 
 
 def get_no_of_forks(cell):
-    # get the degree for every cell pixel (no. of neighbouring pixels)
-    degrees = skeleton_to_csgraph(cell.skeleton)[2]
-    # array of all pixel locations with degree more than 2
-    fork_image = np.where(degrees > [2], 1, 0)
-    s = generate_binary_structure(cell.skeleton.ndim, 2)
-    num_forks = label(fork_image, structure=s)[1]
+    # """Calculates # of forks by creating a binary structure
+    # and counting all connected objects. Not the way it's done
+    # in skan >=0.10"""
+    # # get the degree for every cell pixel (no. of neighbouring pixels)
+    # degrees = make_degree_image(cell.skeleton)
+    # # array of all pixel locations with degree more than 2
+    # fork_image = np.where(degrees > [2], 1, 0)
+    # s = generate_binary_structure(cell.skeleton.ndim, 2)
+    # num_forks = label(fork_image, structure=s)[1]
 
-    # for future plotting
-    fork_indices = np.where(degrees > [2])
-    if cell.skeleton.ndim == 2:
-        cell._fork_coords = zip(fork_indices[0], fork_indices[1])
-    else:
-        cell._fork_coords = zip(fork_indices[0], fork_indices[1],
-                                fork_indices[2])
+    # # for future plotting
+    # fork_indices = np.where(degrees > [2])
+    # if cell.skeleton.ndim == 2:
+    #     cell._fork_coords = zip(fork_indices[0], fork_indices[1])
+    # else:
+    #     cell._fork_coords = zip(fork_indices[0], fork_indices[1],
+    #                             fork_indices[2])
+    num_forks = np.sum(cell._skeleton.degrees > 2)
 
     return num_forks
 
 
+def _cmp(branch, path):
+    start_end_pair = [path[0], path[-1]]
+    return (
+        np.all(branch[:2] == start_end_pair)
+        or np.all(branch[:2] == start_end_pair[::-1])
+    )
+
+
 def _branch_structure(junctions, branch_stats, paths_list):
+    """
+    junctions
+    branches : array of float, shape (N, {4, 5})
+        An array containing branch endpoint IDs, length, and branch type.
+        The types are:
+        - tip-tip (0)
+        - tip-junction (1)
+        - junction-junction (2)
+        - path-path (3) (This can only be a standalone cycle)
+    paths_list
+    """
     next_set_junctions = []
     next_set_branches = []
     term_branches = []
@@ -281,27 +297,27 @@ def _branch_structure(junctions, branch_stats, paths_list):
     for junction in junctions:
         branches_travelled = []
         for branch_no, branch in enumerate(branch_stats):
-            if branch[0] == junction:
-                if branch[3] == 2:
-                    next_set_junctions.append(branch[1])
+            if branch[0] == junction:  # check if start node ID of current branch equals junction
+                if branch[3] == 2:  # junction-junction
+                    next_set_junctions.append(branch[1])  # next process with junction as it's ending node
                     for path in paths_list:
                         if _cmp(branch, path):
                             next_set_branches.append(path)
                             branches_travelled.append(branch_no)
-                if branch[3] == 1:
+                if branch[3] == 1:  # terminal branch
                     for path in paths_list:
                         if _cmp(branch, path):
                             term_branches.append(path)
                             next_set_branches.append(path)
                             branches_travelled.append(branch_no)
-            elif branch[1] == junction:
-                if branch[3] == 2:
+            elif branch[1] == junction:  # check if end node ID of current branch equals junction
+                if branch[3] == 2:  # junction-junction
                     next_set_junctions.append(branch[0])
                     for path in paths_list:
                         if _cmp(branch, path):
                             next_set_branches.append(path)
                             branches_travelled.append(branch_no)
-                if branch[3] == 1:
+                if branch[3] == 1:  # terminal branch
                     for path in paths_list:
                         if _cmp(branch, path):
                             term_branches.append(path)
@@ -314,18 +330,22 @@ def _branch_structure(junctions, branch_stats, paths_list):
 
 
 def classify_branching_structure(cell, soma_on_skeleton):
+    """
+    Won't work of linear cells (tip-tip only)
+    """
     skel_obj = cell._skeleton
 
     def _get_soma_node():
         near = []
         for i in range(skel_obj.n_paths):
             path_coords = skel_obj.path_coordinates(i)
-            nearest = min(path_coords, key=lambda x: _distance(
-                soma_on_skeleton, x))
+            amin = np.argmin(np.linalg.norm(path_coords - soma_on_skeleton, axis=1))
+            nearest = path_coords[amin]
             near.append(nearest)
 
-        soma_on_path = min(near, key=lambda x: _distance(
-            soma_on_skeleton, x))
+        near = np.asarray(near)
+        amin = np.argmin(np.linalg.norm(near - soma_on_skeleton, axis=1))
+        soma_on_path = near[amin]
 
         for i, j in enumerate(skel_obj.coordinates):
             if all(soma_on_path == j):
@@ -341,7 +361,7 @@ def classify_branching_structure(cell, soma_on_skeleton):
                 soma_branches.append(path)
         return soma_branches
 
-    pixel_graph, coords = skeleton_to_csgraph(cell.skeleton)[0:2]
+    pixel_graph, coords = cell._skeleton.graph, cell._skeleton.coordinates
     branch_stats = branch_statistics(pixel_graph)
     paths_list = skel_obj.paths_list()
 
@@ -352,11 +372,11 @@ def classify_branching_structure(cell, soma_on_skeleton):
     soma_node = _get_soma_node()
     soma_branches = _get_soma_branches(soma_node, paths_list)
     if len(soma_branches) > 2:
-        junctions = soma_node
+        junctions = soma_node  # ID of the soma node (not lying on any branch)
         delete_soma_branch = False
     else:
         # collect first level/primary branches
-        junctions = [soma_branches[0][0], soma_branches[0][-1]]
+        junctions = [soma_branches[0][0], soma_branches[0][-1]]  # ID (indices) of start & end node of soma_branch
         delete_soma_branch = True
 
     # eliminate loops in branches and path lists
@@ -381,6 +401,9 @@ def get_primary_branches(branching_struct):
     n_prim_branches = len(prim_branches)
     avg_len_of_prim_branches = 0 if n_prim_branches == 0 else sum(
         map(len, prim_branches))/float(len(prim_branches))
+
+    if n_prim_branches < 1:
+        raise ValueError("Unable to detect any primary branches")
 
     return n_prim_branches, avg_len_of_prim_branches
 

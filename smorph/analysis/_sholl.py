@@ -14,10 +14,6 @@ from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import PolynomialFeatures
 from scipy.stats import skew
 
-from ..util._image import (
-    _distance,
-)
-
 
 def sholl_analysis(
     shell_step_size,
@@ -121,7 +117,7 @@ def _concentric_coords_and_values(
     if padded_skeleton.ndim == 2:
         for pt, value in np.ndenumerate(padded_skeleton):
             for radius in concentric_radii:
-                lhs = _distance(pt, pad_sk_soma)
+                lhs = np.linalg.norm(np.asarray(pt) - pad_sk_soma)
                 if abs(lhs - radius) < 0.9:
                     concentric_coords[radius].append(pt)
                     concentric_coords_intensities[radius].append(value)
