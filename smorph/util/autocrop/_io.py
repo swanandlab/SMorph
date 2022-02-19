@@ -1,5 +1,4 @@
 import json
-from re import I
 import uuid
 from os import getcwd, mkdir, path
 from shutil import rmtree
@@ -9,13 +8,14 @@ import numpy as np
 import roifile
 import skimage.io as io
 import tifffile
+from imaris_ims_file_reader.ims import ims
 from skimage import img_as_float, img_as_ubyte, exposure
 
 from .util import _unwrap_polygon
 from ...analysis._skeletal import _get_blobs
 
 
-def _import_image(img_path, channel_interest=0):
+def _import_image(img_path, channel_interest):
     # image has to be converted to float for processing
     if img_path.split('.')[-1] == 'czi':
         img = czifile.imread(img_path)
@@ -28,10 +28,14 @@ def _import_image(img_path, channel_interest=0):
         img = np.squeeze(img)
         if img.ndim > 3:
             img = img[:, channel_interest]
+    elif img_path.split('.')[-1] == 'ims':
+        ims_file = ims(img_path, ResolutionLevelLock=0)
+        img = ims_file[0,0,channel_interest,:,:,:]
+        img = np.squeeze(img)
     else:
         img = np.squeeze(io.imread(img_path))
         if img.ndim > 3:
-            img = img[channel_interest]
+            img = img[:, :, :, channel_interest]
 
     img = img_as_float(img)
     img = (img - img.min()) / (img.max() - img.min())
