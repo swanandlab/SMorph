@@ -253,9 +253,9 @@ def _analyze_cells(
         group_cnts.append(group_cell_cnt)
         tmp_fnames = [cell_name for idx, cell_name in enumerate(file_names)
                       if idx not in bad_cells_idx][:sum(group_cnts)]
-        features = DataFrame(dataset_features, columns=_ALL_FEATURE_NAMES)
         all_labels = [labels[i] for i in range(len(group_cnts))
-                        for j in range(group_cnts[i])]
+                      for j in range(group_cnts[i])]
+        features = DataFrame(dataset_features, columns=_ALL_FEATURE_NAMES)
 
         if save_results:
             out_features = features.copy()
@@ -266,6 +266,8 @@ def _analyze_cells(
     file_names = [cell_name for idx, cell_name in enumerate(file_names)
                   if idx not in bad_cells_idx]
     features = DataFrame(dataset_features, columns=_ALL_FEATURE_NAMES)
+    all_labels = [labels[i] for i in range(len(group_cnts))
+                  for j in range(group_cnts[i])]
 
     if features.empty:
         raise ValueError('No cells were analyzed successfully! Please check '
@@ -274,6 +276,7 @@ def _analyze_cells(
     if save_results:
         out_features = features.copy()
         out_features.insert(0, 'cell_image_file', file_names)
+        out_features.insert(0, 'label', all_labels)
         df_to_csv(out_features, FEATURES_DIR, FEATURES_FILE_NAME)
 
     return (features, targets, sholl_original_plots, sholl_polynomial_plots,
@@ -410,8 +413,9 @@ class Groups:
         """
         file_names = self.file_names
         sholl_step_sz = self.sholl_step_size
+        sholl_polynomial_plots = self.sholl_polynomial_plots
         polynomial_plots = list(map(lambda x: list(x),
-                                    self.sholl_polynomial_plots))
+                                    sholl_polynomial_plots))
         group_cnts = self.group_counts
         labels = self.labels
 
@@ -423,6 +427,23 @@ class Groups:
         x = np.arange(sholl_step_sz,
             sholl_step_sz * (len_polynomial_plots + 1),
             sholl_step_sz)
+
+        # JASP-friendly data
+        jasp_friendly_cols = ['label', 'radius', 'nintersections']
+        jasp_friendly = []
+        csum_group_cnts = np.cumsum(group_cnts)
+        for itercell in range(len(sholl_polynomial_plots)):
+            for iterradii, r in enumerate(x):
+                nintersections = (0 if iterradii >= len(sholl_polynomial_plots[itercell])
+                    else sholl_polynomial_plots[itercell][iterradii])
+                row = [
+                    labels[np.digitize(itercell, csum_group_cnts)],
+                    r,
+                    nintersections
+                ]
+                jasp_friendly.append(row)
+
+        jasp_friendly = DataFrame(jasp_friendly, columns=jasp_friendly_cols)
 
         lft_idx = 0
         err_fn = np.std if min(group_cnts) > 1e5 else sem
@@ -484,6 +505,7 @@ class Groups:
             # single_cell_intersections
             DIR, OUTFILE = '/Results/', 'sholl_intersections.csv'
             df_to_csv(write_buffer, DIR, OUTFILE)
+            df_to_csv(jasp_friendly, DIR, 'sholl_intersections_jasp.csv')
 
             OUTPLOT = f'avg_sholl_plot.{self.fig_format}'
             savefig(fig, DIR + OUTPLOT)
