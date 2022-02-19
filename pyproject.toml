@@ -5,7 +5,7 @@ description = "A library for rapid analysis of the morphology of cells of the ne
 authors = ["Parul Sethi <parul1sethi@gmail.com>", "Kushaan Gupta <gkushaan@rediffmail.com>"]
 
 [tool.poetry.dependencies]
-python = "^3.7.8"
+python = "^3.8.0"
 jupyter = "^1.0.0"
 matplotlib = "^3.5.1"
 networkx = "^2.6.3"
@@ -33,6 +33,11 @@ statannotations = "^0.4.3"
 imaris-ims-file-reader = "^0.1.4"
 ipyfilechooser = "^0.6.0"
 Shapely = "^1.8.0"
+Mako = "^1.1.6"
+hdbscan = "^0.8.28"
+magic-class = "^0.5.20"
+zarr = "^2.11.0"
+magicgui = "^0.3.7"
 
 [tool.poetry.dev-dependencies]
 
