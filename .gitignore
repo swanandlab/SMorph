@@ -55,6 +55,9 @@ doc/_build/
 # IDE specific
 .vscode
 
+# Development
+poetry.lock
+
 # Analysis results
 Datasets/
 Results/

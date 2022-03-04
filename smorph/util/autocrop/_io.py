@@ -1,74 +1,102 @@
 import json
 import uuid
+from collections import defaultdict
 from os import getcwd, mkdir, path
+from pathlib2 import Path
 from shutil import rmtree
+from xml.etree import ElementTree
 
 import czifile
 import numpy as np
 import roifile
 import skimage.io as io
 import tifffile
+from aicsimageio import AICSImage
 from imaris_ims_file_reader.ims import ims
+from ome_types.model import ome
 from skimage import img_as_float, img_as_ubyte, exposure
 
 from .util import _unwrap_polygon
 from ...analysis._skeletal import _get_blobs
 
 
-def _import_image(img_path, channel_interest):
+def etree_to_dict(t):
+    d = {t.tag: {} if t.attrib else None}
+    children = list(t)
+    if children:
+        dd = defaultdict(list)
+        for dc in map(etree_to_dict, children):
+            for k, v in dc.items():
+                dd[k].append(v)
+        d = {t.tag: {k: v[0] if len(v) == 1 else v
+                     for k, v in dd.items()}}
+    if t.attrib:
+        d[t.tag].update(('@' + k, v)
+                        for k, v in t.attrib.items())
+    if t.text:
+        text = t.text.strip()
+        if children or t.attrib:
+            if text:
+                d[t.tag]['#text'] = text
+        else:
+            d[t.tag] = text
+    return d
+
+
+def _import_image(im_path, channel_interest):
     # image has to be converted to float for processing
-    if img_path.split('.')[-1] == 'czi':
-        img = czifile.imread(img_path)
-        img = img.data
-        img = np.squeeze(img)
-        if img.ndim > 3:
-            img = img[channel_interest]
-    elif img_path.split('.')[-1] == 'lsm':
-        img = tifffile.imread(img_path)
-        img = np.squeeze(img)
-        if img.ndim > 3:
-            img = img[:, channel_interest]
-    elif img_path.split('.')[-1] == 'ims':
-        ims_file = ims(img_path, ResolutionLevelLock=0)
-        img = ims_file[0,0,channel_interest,:,:,:]
-        img = np.squeeze(img)
+    if im_path.split('.')[-1] in ('czi', 'lif', 'ims', 'lsm', 'tiff'):
+        imfile = AICSImage(im_path)
+        imfile.set_scene(0)
+        im = imfile.get_image_data("ZYX", T=0, C=channel_interest)
+
+        # assumes resolution unit is in microns
+        scale = tuple(imfile.physical_pixel_sizes)  # tuple(map(lambda a: a * 1e-6, tuple(imfile.physical_pixel_sizes)))
+        if isinstance(imfile.metadata, ElementTree.Element):
+            metadata = etree_to_dict(imfile.metadata)
+        elif isinstance(imfile.metadata, ome.OME):
+            metadata = imfile.metadata.dict()
+        else:
+            metadata = imfile.metadata
     else:
-        img = np.squeeze(io.imread(img_path))
+        im = np.squeeze(io.imread(im_path))
         if img.ndim > 3:
-            img = img[:, :, :, channel_interest]
+            im = im[:, :, :, channel_interest]
+        scale = (1,1,1)
+        metadata = {}
 
-    img = img_as_float(img)
-    img = (img - img.min()) / (img.max() - img.min())
-    return img
+    im = img_as_float(im)
+    im = (im - im.min()) / (im.max() - im.min())
+    return im, scale, metadata
 
 
-def imread(img_path, ref_path=None, channel_interest=0):
-    """Loads the image.
+def imread(im_path, ref_path=None, channel_interest=0):
+    """Loads the image & scale.
 
-    - Tested on: CZI, LSM, TIFF
+    - Tested on: CZI, IMS, LIF, LSM, TIFF.
 
     Parameters
     ----------
-    img_path : str
+    im_path : str
         Path to the confocal tissue image.
     ref_path : str
         Path to the reference image to whole exposure level
-        `img_path` would be standardized.
+        `im_path` would be standardized.
     channel_interest : int
         Channel of interest containing image data to be processed,
         by default 0
 
     """
     # image has to be converted to float for processing
-    img = _import_image(img_path, channel_interest)
+    im, scale, metadata = _import_image(im_path, channel_interest)
 
-    img = img if img.ndim == 3 else np.expand_dims(img, 0)
+    im = im if im.ndim == 3 else np.expand_dims(img, 0)
 
     if ref_path is not None:
-        ref_img = _import_image(ref_path, channel_interest)
-        img = exposure.match_histograms(img, ref_img)
+        ref_im = _import_image(ref_path, channel_interest)[0]
+        im = exposure.match_histograms(im, ref_img)
 
-    return img
+    return im, scale, metadata
 
 
 def _mkdir_if_not(name):
@@ -150,12 +178,12 @@ def export_cells(
         raise ValueError('`seg_type` must be either of `segmented`, '
                          '`unsegmented`, `both`')
 
-    DIR = getcwd() + '/Autocropped/'
+    DIR = path.join(getcwd(), '/Autocropped/')
     _mkdir_if_not(DIR)
 
     IMAGE_NAME = '.'.join(path.basename(img_path).split('.')[:-1])
-    OUT_DIR = DIR + IMAGE_NAME + \
-              f'{"" if roi_name == "" else "-" + str(roi_name)}/'
+    OUT_DIR = path.join(DIR, IMAGE_NAME + \
+                f'{"" if roi_name == "" else "-" + str(roi_name)}/')
     # if path.exists(OUT_DIR) and path.isdir(OUT_DIR):  # mandatory new dir
     #     rmtree(OUT_DIR)
     # mkdir(OUT_DIR)
@@ -163,19 +191,19 @@ def export_cells(
 
     if out_type == OUT_TYPES[2]:
         if seg_type == SEG_TYPES[2]:
-            _mkdir_if_not(OUT_DIR + SEG_TYPES[0] + '_' + OUT_TYPES[0])
-            _mkdir_if_not(OUT_DIR + SEG_TYPES[0] + '_' + OUT_TYPES[1])
-            _mkdir_if_not(OUT_DIR + SEG_TYPES[1] + '_' + OUT_TYPES[0])
-            _mkdir_if_not(OUT_DIR + SEG_TYPES[1] + '_' + OUT_TYPES[1])
+            _mkdir_if_not(path.join(OUT_DIR, SEG_TYPES[0] + '_' + OUT_TYPES[0]))
+            _mkdir_if_not(path.join(OUT_DIR, SEG_TYPES[0] + '_' + OUT_TYPES[1]))
+            _mkdir_if_not(path.join(OUT_DIR, SEG_TYPES[1] + '_' + OUT_TYPES[0]))
+            _mkdir_if_not(path.join(OUT_DIR, SEG_TYPES[1] + '_' + OUT_TYPES[1]))
         else:
-            _mkdir_if_not(OUT_DIR + seg_type + '_' + OUT_TYPES[0])
-            _mkdir_if_not(OUT_DIR + seg_type + '_' + OUT_TYPES[1])
+            _mkdir_if_not(path.join(OUT_DIR, seg_type + '_' + OUT_TYPES[0]))
+            _mkdir_if_not(path.join(OUT_DIR, seg_type + '_' + OUT_TYPES[1]))
     else:
         if seg_type == SEG_TYPES[2]:
-            _mkdir_if_not(OUT_DIR + SEG_TYPES[0] + '_' + out_type)
-            _mkdir_if_not(OUT_DIR + SEG_TYPES[1] + '_' + out_type)
+            _mkdir_if_not(path.join(OUT_DIR, SEG_TYPES[0] + '_' + out_type))
+            _mkdir_if_not(path.join(OUT_DIR, SEG_TYPES[1] + '_' + out_type))
         else:
-            _mkdir_if_not(OUT_DIR + seg_type + '_' + out_type)
+            _mkdir_if_not(path.join(OUT_DIR, seg_type + '_' + out_type))
 
     cell_metadata = {}
 
@@ -248,14 +276,14 @@ def export_cells(
 
                 if out_type == OUT_TYPES[2]:
                     out = segmented
-                    out_name = f'{OUT_DIR}{SEG_TYPES[0]}_{OUT_TYPES[0]}/'+name
+                    out_name = path.join(OUT_DIR, f'{SEG_TYPES[0]}_{OUT_TYPES[0]}', name)
                     tifffile.imsave(out_name, out, description=out_metadata,
                                     software='Autocrop')
 
                     out = np.pad(np.max(segmented, 0),
                                  pad_width=max(segmented.shape[1:]) // 5,
                                  mode='constant')
-                    out_name = f'{OUT_DIR}{SEG_TYPES[0]}_{OUT_TYPES[1]}/'+name
+                    out_name = path.join(OUT_DIR, f'{SEG_TYPES[0]}_{OUT_TYPES[1]}', name)
                     tifffile.imsave(out_name.replace('.tif', '_mip.tif'), out,
                                     description=out_metadata,
                                     software='Autocrop')
@@ -264,7 +292,7 @@ def export_cells(
                         np.max(segmented, 0),
                         pad_width=max(segmented.shape[1:]) // 5,
                         mode='constant')
-                    out_name = f'{OUT_DIR}{SEG_TYPES[0]}_{out_type}/'+name
+                    out_name = path.join(OUT_DIR, f'{SEG_TYPES[0]}_{out_type}', name)
                     tifffile.imsave(out_name.replace('.tif', '_mip.tif'), out,
                                     description=out_metadata,
                                     software='Autocrop')
@@ -289,23 +317,23 @@ def export_cells(
 
                 if out_type == OUT_TYPES[2]:
                     out = segmented
-                    out_name = f'{OUT_DIR}{SEG_TYPES[1]}_{OUT_TYPES[0]}/'+name
+                    out_name = path.join(OUT_DIR, f'{SEG_TYPES[1]}_{OUT_TYPES[0]}', name)
                     tifffile.imsave(out_name, out, description=out_metadata,
                                     software='Autocrop')
 
                     out = np.max(segmented, 0)
-                    out_name = f'{OUT_DIR}{SEG_TYPES[1]}_{OUT_TYPES[1]}/'+name
+                    out_name = path.join(OUT_DIR, f'{SEG_TYPES[1]}_{OUT_TYPES[1]}', name)
                     tifffile.imsave(out_name, out, description=out_metadata,
                                     software='Autocrop')
                 else:
                     out = segmented if out_type == OUT_TYPES[0] else np.max(
                         segmented, 0)
-                    out_name = f'{OUT_DIR}{SEG_TYPES[1]}_{out_type}/'+name
+                    out_name = path.join(OUT_DIR, f'{SEG_TYPES[1]}_{out_type}', name)
                     tifffile.imsave(out_name, out, description=out_metadata,
                                     software='Autocrop')
 
     if residue_regions is not None:
-        RES_DIR = OUT_DIR + 'residue'
+        RES_DIR = path.join(OUT_DIR, 'residue')
         _mkdir_if_not(RES_DIR)
         for (obj, region) in enumerate(residue_regions):
             if low_vol_cutoff <= region['vol']:  # for postprocessing
@@ -324,7 +352,7 @@ def export_cells(
                 roi = _build_multipoint_roi(markers)
 
                 name = str(uuid.uuid4().hex)
-                out_name = f'{RES_DIR}/'+name
+                out_name = path.join(RES_DIR, name)
 
                 cell_metadata['bounds'] = region['bbox']
                 out_metadata = json.dumps(cell_metadata)

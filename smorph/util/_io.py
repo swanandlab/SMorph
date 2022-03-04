@@ -18,12 +18,12 @@ def mkdir_if_not(name):
         mkdir(name)
 
 
-def read_group_folders(group_folders):
+def read_group_dirs(group_dirs):
     """Synchronously read list of folders for images.
 
     Parameters
     ----------
-    group_folders : list
+    group_dirs : list
         A list of strings containing path of each folder with image dataset.
 
     Returns
@@ -36,7 +36,7 @@ def read_group_folders(group_folders):
     """
     file_names, dataset = [], []
 
-    for group in group_folders:
+    for group in group_dirs:
         group_data = []
         for file in listdir(group):
             if not file.startswith('.'):  # skip hidden files
@@ -62,15 +62,15 @@ def df_to_csv(df, folder, out_file_name):
         Name of the file to export with extension.
 
     """
-    DIR = getcwd() + folder
-    FILE = DIR + out_file_name
+    DIR = path.join(getcwd(), folder)
+    FILE = path.join(DIR, out_file_name)
     if not (path.exists(DIR) and path.isdir(DIR)):
         mkdir(DIR)
     if path.exists(FILE):
         remove(FILE)
 
-    df.to_csv(DIR + out_file_name, index=False, mode='w')
+    df.to_csv(FILE, index=False, mode='w')
 
 
 def savefig(fig, name):
-    fig.savefig(getcwd() + name, transparent=False, facecolor='w')
+    fig.savefig(path.join(getcwd(), name), transparent=False, facecolor='w')

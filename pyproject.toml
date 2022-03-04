@@ -38,6 +38,11 @@ hdbscan = "^0.8.28"
 magic-class = "^0.5.20"
 zarr = "^2.11.0"
 magicgui = "^0.3.7"
+pathlib2 = "^2.3.7"
+aicsimageio = "^4.6.0"
+bioformats-jar = "^6.7.0"
+aicspylibczi = "^3.0.5"
+readlif = "^0.6.5"
 
 [tool.poetry.dev-dependencies]
 
