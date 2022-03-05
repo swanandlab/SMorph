@@ -4,22 +4,38 @@ from os import (
     listdir,
     path,
 )
+import json
+import pathlib2
+import uuid
+from shutil import rmtree
 
+import dask.array as da
 import ipywidgets as widgets
 import matplotlib.pyplot as plt
 import numpy as np
 import napari
 import PyQt5
 import superqt
+import zarr
+import roifile
+import tifffile
 
 from matplotlib import gridspec
+from matplotlib.path import Path
+import matplotlib.patches as patches
+
 from magicgui import magicgui
 from psutil import virtual_memory
 from scipy.spatial import ConvexHull
-from scipy.ndimage import (
-    find_objects,
-    distance_transform_edt,
+from scipy import (
+    ndimage as ndi,
+    sparse,
 )
+from skan.csr import (
+    Skeleton,
+    summarize,
+)
+from skimage import img_as_float, img_as_ubyte, exposure
 from skimage.draw import polygon2mask
 from skimage.exposure import (
     equalize_adapthist,
@@ -40,20 +56,26 @@ from skimage.filters import (
     threshold_triangle,
     threshold_yen,
 )
+from skimage.graph import central_pixel
 from skimage.measure import label
 from skimage.morphology import (
     binary_erosion,
     opening,
+    skeletonize,
 )
 from skimage.restoration import (
     rolling_ball,
 )
-from skimage.segmentation import clear_border
+from skimage.segmentation import (
+    clear_border,
+    relabel_sequential,
+)
 from skimage.util import unique_rows
-from scipy import ndimage as ndi
 from vispy.geometry.rect import Rect
 
 from ._io import (
+    _build_multipoint_roi,
+    _mkdir_if_not,
     imread,
     export_cells,
 )
@@ -313,64 +335,175 @@ def _filter_small_objects(regions, cutoff_volume=64):
     return filtered
 
 
+def _simplify_graph(skel):
+    """Iterative removal of all nodes of degree 2 while reconnecting their
+    edges.
+
+    Parameters
+    ----------
+    skel : skan.csr.Skeleton
+        A Skeleton object containing graph to be simplified.
+
+    Returns
+    -------
+    simp_csgraph : scipy.sparse.csr_matrix
+        A sparse adjacency matrix of the simplified graph.
+    reduced_nodes : tuple of int
+        The index nodes of original graph in simplified graph.
+    """
+    summary = summarize(skel)
+    src = np.asarray(summary['node-id-src'])
+    dst = np.asarray(summary['node-id-dst'])
+    distance = np.asarray(summary['branch-distance'])
+
+    # to reduce the size of simplified graph
+    _, fw, inv = relabel_sequential(np.append(src, dst))
+    src_relab, dst_relab = fw[src], fw[dst]
+
+    n_nodes = max(np.max(src_relab), np.max(dst_relab))
+
+    edges = sparse.coo_matrix(
+            (distance, (src_relab - 1, dst_relab - 1)),
+            shape=(n_nodes, n_nodes)
+            )
+    dir_csgraph = edges.tocsr()
+    simp_csgraph = dir_csgraph + dir_csgraph.T  # make undirected
+
+    reduced_nodes = inv[np.arange(1, simp_csgraph.shape[0] + 1)]
+
+    return simp_csgraph, reduced_nodes
+
+
+def _fast_graph_center_idx(skel):
+    """Accelerated graph center finding using simplified graph.
+
+    Parameters
+    ----------
+    skel : skan.csr.Skeleton
+        A Skeleton object containing graph whose center is to be found.
+
+    Returns
+    -------
+    original_center_idx : int
+        The index of central node of graph.
+    """
+    simp_csgraph, reduced_nodes = _simplify_graph(skel)
+    simp_center_idx, _ = central_pixel(simp_csgraph)
+    original_center_idx = reduced_nodes[simp_center_idx]
+
+    return original_center_idx
+
+
 def approximate_somas(im, regions, src=None):
     somas_estimates = []
     if src is not None:
         somas_estimates = np.load(src, allow_pickle=True)[0]
         return somas_estimates
+
     for region in regions:
         minz, miny, minx, maxz, maxy, maxx = region['bbox']
         ll = np.array([minz, miny, minx])
-        segmented_cell = im[minz:maxz, miny:maxy, minx:maxx] * region['image']
-        try:
-            # problematic cause multiple forks in prim
-            distance = distance_transform_edt(region['image'])
-            # distance = segmented_cell
-            normed_distance = (distance - distance.min()) / \
-                (distance.max() - distance.min())
-            normed_distance = gaussian(normed_distance, sigma=1)
-            blurred_opening = opening(normed_distance)
-            blobs = _get_blobs(blurred_opening, 'confocal')
-            coords = np.round_(
-                blobs[blobs[:, 3].argsort()][:, :-1]).astype(int)
+        seg_cell = im[minz:maxz, miny:maxy, minx:maxx] * region['image']
 
-            areg = []
-            opened_labels = label(opening(distance))
-            for coord in coords:
-                areg.append(opened_labels[tuple(coord)])
-            visited = []
-            filtered_coords = []
-            for i in range(len(areg)):
-                if areg[i] not in visited:
-                    filtered_coords.append(coords[i])
-                    visited.append(areg[i])
-            filtered_coords = np.array(filtered_coords)
-            mask = np.zeros_like(distance, dtype=bool)
-            mask[tuple(filtered_coords.T)] = True
-            coords = peak_local_max(distance, footprint=np.ones((3, 3, 3)))
-            mask[tuple(coords.T)] *= True
+        # try:
+        # problematic cause multiple forks in prim
+        # distance = ndi.distance_transform_edt(region['image'])
+        # distance = seg_cell
+        # distance = imnorm(distance)
+        # distance = gaussian(distance, sigma=1)
+        # blurred_opening = opening(distance)
+        # blobs = _get_blobs(blurred_opening, 'confocal')
+        # coords = np.round(
+        #     blobs[blobs[:, 3].argsort()][:, :-1]).astype(int)
 
-            # sanity check if all empty pxls
-            final_coords = np.array([c for c in np.transpose(
-                np.nonzero(mask)) if segmented_cell[tuple(c.T)]])
+        # # assure well separated blobs
+        # opened_labels = label(opening(distance))
+        # areg = [opened_labels[tuple(coord)] for coord in coords]
+        # visited = []
+        # filtered_coords = []
 
-            if len(final_coords) == 0:
-                raise Exception('Failed automatic soma detection!')
+        # for i in range(len(areg)):
+        #     if areg[i] not in visited:
+        #         filtered_coords.append(coords[i])
+        #         visited.append(areg[i])
 
-            somas_estimates.extend(ll + final_coords)
-        except:
-            centroid = np.round_(region['centroid']).astype(np.int64)
-            if region['image'][tuple(centroid - ll)]:
-                somas_estimates.append(centroid)
-            else:
-                # Desparate measure: set the max value index
-                somas_estimates.append(
-                    ll + np.unravel_index(np.argmax(segmented_cell), region['image'].shape))
+        # filtered_coords = np.array(filtered_coords)
+
+        # mask = np.zeros_like(seg_cell, dtype=bool)
+        # mask[tuple(filtered_coords.T)] = True
+
+        # # filter blobs with local max peaks
+        # coords = peak_local_max(distance, footprint=np.ones((3, 3, 3)))
+        # mask[tuple(coords.T)] *= True
+
+        # filter blobs with forks
+        imskel = skeletonize(gaussian(region['image'], sigma=1))
+        skel = Skeleton(imskel)
+
+        # soma finding
+        original_center_idx = _fast_graph_center_idx(skel)
+
+        neighbors = [original_center_idx]
+        original_center_idx = neighbors.pop(0)
+
+        itr = 0
+        ITR_CUTOFF = 100
+        while (
+            region['image'][tuple(skel.coordinates[original_center_idx].astype(int))] == 0
+            and itr < ITR_CUTOFF
+        ):
+            if len(neighbors) == 0:
+                neighbors = list(skel.nbgraph.neighbors(original_center_idx))
+            original_center_idx = neighbors.pop(0)
+            itr += 1
+
+        if itr < ITR_CUTOFF:
+            final_coords = np.asarray([
+                skel.coordinates[original_center_idx].astype(int)
+                ])
+        else:
+            # fail-safe select coord w/ highest degree
+            final_coords = np.asarray([
+                skel.coordinates[np.argmax(skel.degrees)].astype(int)
+                ])
+        # min spanning tree
+        # _, px_coords = skeleton_to_csgraph(skel)
+        # px_coords = px_coords.astype(int)
+        # mst_skel = np.zeros_like(seg_cell, dtype=bool)
+        # for c in px_coords:
+        #     skel[tuple(c)] = True
+
+        # imdegree = make_degree_image(skel)
+        # fork_degree = 2
+        # mask = (imdegree > fork_degree)
+
+        # sanity check if all empty pxls
+        # final_coords = np.asarray([
+        #     c for c in np.transpose(np.nonzero(mask)) if seg_cell[tuple(c.T)]
+        #     ])
+        # final_coords = skel.coordinates[skel.degrees > fork_degree].astype(int)
+
+        # if len(final_coords) == 0:
+        #     # raise Exception('Failed automatic soma detection!')
+        #     final_coords = np.asarray([
+        #         np.unravel_index(np.argmax(imdegree), imskel.shape)
+        #         ])
+
+        somas_estimates.extend(ll + final_coords)
+        # except:
+        #     centroid = np.round_(region['centroid']).astype(np.int64)
+        #     if region['image'][tuple(centroid - ll)]:
+        #         somas_estimates.append(centroid)
+        #     else:
+        #         # Desparate measure: set the max value index
+        #         somas_estimates.append(
+        #             ll + np.unravel_index(np.argmax(seg_cell), region['image'].shape))
+
     return somas_estimates
 
 
 def arrange_regions(filtered_labels):
-    objects = find_objects(filtered_labels)
+    objects = ndi.find_objects(filtered_labels)
     ndim = filtered_labels.ndim
 
     regions = []
@@ -380,6 +513,7 @@ def arrange_regions(filtered_labels):
         label = itr + 1
         template = dict(image=None, bbox=None, centroid=None, vol=None)
         template['image'] = (filtered_labels[slice] == label)
+        template['image'] = ndi.binary_fill_holes(template['image'])
         template['bbox'] = tuple([slice[i].start for i in range(ndim)] +
                                  [slice[i].stop for i in range(ndim)])
         indices = np.nonzero(template['image'])
@@ -490,38 +624,52 @@ class TissueImage:
         that contains it.
 
     """
-    __slots__ = ('im_path', 'REF_IM_PATH', 'imoriginal', 'imdeconvolved', 'impreprocessed',
-                 'imdenoised', 'imview', 'imrect', 'refdenoised', 'imsegmented', 'labels',
-                 'regions', 'in_box', 'roi_polygon', 'LOW_THRESH', 'HIGH_THRESH', 'LOW_AUTO_THRESH', 'HIGH_AUTO_THRESH', 'region_inclusivity', 'REGION_INCLUSIVITY_LABELS',
-                 'somas_estimates', 'DECONV_ITR', 'CLIP_LIMIT', 'SCALE', 'ROI_PATH', 'ROI_NAME', 'REF_ROI_PATH', 'CACHE_DIR',
-                 'ALL_PT_ESTIMATES', 'FINAL_PT_ESTIMATES', 'residue', 'n_region', 'OBJ_INDEX', 'reconstructed_labels',
-                 'LOW_VOLUME_CUTOFF', 'HIGH_VOLUME_CUTOFF', 'OUT_DIMS', 'SEGMENT_TYPE')
+    __slots__ = ('im_path', 'DECONV_ITR', 'CLIP_LIMIT', 'ROI_PATH', 'ROI_NAME',
+            'SCALE', 'imoriginal', 'imdenoised', 'imsegmented', 'labels',
+            'REF_IM_PATH', 'REF_ROI_PATH', 'refdenoised', "skip_preprocess",
+            'roi_polygon', 'in_box', 'regions', 'residue', 'out_dir',
+            'LOW_THRESH', 'HIGH_THRESH', 'LOW_AUTO_THRESH', 'HIGH_AUTO_THRESH',
+            'CACHE_DIR', 'n_region', 'PROPS', 'metadata',
+            'filtered_regions',  # watershed cache
+            'LOW_VOLUME_CUTOFF', 'HIGH_VOLUME_CUTOFF', 'OUT_DIMS', 'SEGMENT_TYPE',  # export cells
+            'label_diff',  # reproducibility of manual label refinement
+            'somas_estimates', 'ALL_PT_ESTIMATES', 'FINAL_PT_ESTIMATES'  # reproducibility of watershed label refinement
+            )
 
     def __init__(
         self,
         im_path,
         roi_path=None,
         roi_name=None,
-        deconv_itr=30,
+        skip_preprocess=False,
+        deconv_itr=20,
         clip_limit=.02,
         ref_im_path=None,
         ref_roi_path=None,
         cache_dir='Cache',
+        ex_wavelen=None,
+        em_wavelen=None,
+        num_aperture=None,
+        refr_index=None,
+        pinhole_radius=None
     ):
         if not (
-            (roi_path is None and roi_name is None)
+            (roi_path in (None, '') and roi_name in (None, ''))
             or (type(roi_path) == str and type(roi_name) == str)
         ):
             raise ValueError('Load ROI properly')
         self.im_path = im_path
         self.REF_IM_PATH = ref_im_path
-        self.imoriginal = imoriginal = imread(im_path)
+        imoriginal, SCALE, metadata = imread(im_path)
+        self.imoriginal, self.SCALE = imoriginal, SCALE
+        self.metadata = metadata
         self.ROI_PATH = roi_path
         self.REF_ROI_PATH = ref_roi_path
         self.ROI_NAME = roi_name
         self.CACHE_DIR = cache_dir
         self.DECONV_ITR = deconv_itr
         self.CLIP_LIMIT = clip_limit
+        self.skip_preprocess=skip_preprocess
         self.labels = None
         self.regions = None
         self.residue = None
@@ -530,50 +678,52 @@ class TissueImage:
         self.FINAL_PT_ESTIMATES = None
         self.n_region = None
 
-        cached_filename = only_name(im_path) + '.npy'
+        cached_filename = only_name(im_path) + '.zarr'
         cached = False
 
-        try:
-            if cached_filename in listdir(cache_dir):
-                imdeconvolved = np.load(path.join(cache_dir, cached_filename))
-                cached = True
-            else:
-                raise ValueError('Preprocessed image not cached')
-        except:
-            cached = False
-            imdeconvolved = deconvolve(imoriginal, im_path, iters=deconv_itr)
+        if skip_preprocess:
+            imdeconvolved = imoriginal
+        else:
+            try:
+                if cached_filename in listdir(cache_dir):
+                    imdeconvolved = np.asarray(da.from_zarr(path.join(cache_dir, cached_filename)))
+                    cached = True
+                else:
+                    raise ValueError('Preprocessed image not cached')
+            except:
+                cached = False
+                imdeconvolved = deconvolve(imoriginal, im_path, iters=deconv_itr,
+                                           ex_wavelen=ex_wavelen,
+                                           em_wavelen=em_wavelen,
+                                           num_aperture=num_aperture,
+                                           refr_index=refr_index,
+                                           pinhole_radius=pinhole_radius)
 
-        self.imdeconvolved = imdeconvolved
         imshape = imdeconvolved.shape
 
-        SCALE = None
-        try:
-            if im_path.split('.')[-1] in ('czi'):
-                import czifile
-                metadata = czifile.CziFile(im_path).metadata(False)[
-                    'ImageDocument']['Metadata']
-                dim_r = metadata['Scaling']['Items']['Distance'][0]['Value'] * 1e6
-                dim_z = metadata['Scaling']['Items']['Distance'][-1]['Value'] * 1e6
-                SCALE = (dim_z, dim_r, dim_r)
-        except:
-            pass
-
-        self.SCALE = SCALE
-
-        if cached:
+        if cached or skip_preprocess:
             impreprocessed = imdeconvolved
         else:
             #TODO: hardcoded 50
             rb_radius = (min(imdeconvolved.shape) -
                          1)//2 if imoriginal.ndim == 3 else 50
-            background = rolling_ball(imdeconvolved, radius=rb_radius)
-            impreprocessed = imdeconvolved-background
-            impreprocessed = equalize_adapthist(impreprocessed,
-                                                clip_limit=clip_limit)
+            if rb_radius < 25:
+                background = rolling_ball(imdeconvolved, radius=rb_radius)
+            else:
+                background = np.zeros_like(imdeconvolved)
+                for i in range(imdeconvolved.shape[0]):
+                    background[i] = rolling_ball(imdeconvolved[i], radius=rb_radius)
 
-        self.impreprocessed = impreprocessed
+            if clip_limit == 0:
+                impreprocessed = imdeconvolved-background
+            else:
+                impreprocessed = equalize_adapthist(impreprocessed,
+                    clip_limit=clip_limit
+                    )
 
-        select_roi = roi_path is not None and roi_name is not None
+            zarr.save(f"{cache_dir}/{cached_filename}", impreprocessed)
+
+        select_roi = not(roi_path in (None, '')) and not(roi_name in (None, ''))
 
         roi_polygon = (np.array([[0, 0], [impreprocessed.shape[0]-1, 0],
                                  [impreprocessed.shape[0]-1, impreprocessed.shape[1]-1],
@@ -583,44 +733,56 @@ class TissueImage:
         self.roi_polygon = roi_polygon
 
         if select_roi:
-            _, imoriginal = mask_ROI(imoriginal, roi_polygon)
-            _, imdeconvolved = mask_ROI(imdeconvolved, roi_polygon)
-            self.imrect, impreprocessed = mask_ROI(impreprocessed, roi_polygon)
-        else:
-            self.imrect = impreprocessed
+            mask, bounds = mask_ROI(imoriginal, roi_polygon)
+            imoriginal *= np.broadcast_to(mask, imoriginal.shape)
+            imoriginal = imoriginal[bounds]  # reduce non-empty
 
+            impreprocessed *= np.broadcast_to(mask, impreprocessed.shape)
+            impreprocessed = impreprocessed[bounds]
         self.imoriginal = imoriginal
-        self.imdeconvolved = imdeconvolved
-        self.impreprocessed = impreprocessed
+
+        DIR = path.join(getcwd(), 'Autocropped')
+        OUT_DIR = path.join(DIR, only_name(self.im_path) + \
+                f'{"" if self.ROI_NAME == "" else "-" + str(self.ROI_NAME)}/')
+        self.out_dir = OUT_DIR
 
         # Load reference
-        if ref_im_path is not None:
+        if not(ref_im_path in (None, '')):
             imname = only_name(ref_im_path)
-            REF_SUFFIX = f'-{roi_name}-ref.npy'
+            REF_SUFFIX = f'-{roi_name}-ref.zarr'
             try:
                 cached_filename = imname + REF_SUFFIX
-                refdenoised = np.load(path.join(cache_dir, cached_filename))
+                refdenoised = np.asarray(da.from_zarr(path.join(cache_dir, cached_filename)))
             except:
-                cached_filename = imname + '.npy'
+                cached_filename = imname + '.zarr'
                 cached = False
 
                 try:
                     if cached_filename in listdir(cache_dir):
-                        refdeconvolved = np.load(path.join(cache_dir, cached_filename))
+                        refdeconvolved = np.asarray(da.from_zarr(path.join(cache_dir, cached_filename)))
                         cached = True
                     else:
                         raise ValueError('Preprocessed image not cached')
                 except:
                     cached = False
-                    refdeconvolved = deconvolve(imread(ref_im_path), ref_im_path, iters=deconv_itr)
+                    refdeconvolved = deconvolve(imread(ref_im_path)[0], ref_im_path, iters=deconv_itr)
 
-                if cached:
+                if cached or skip_preprocess:
                     refpreprocessed = refdeconvolved
                 else:
-                    background = rolling_ball(refdeconvolved, radius=(min(refdeconvolved.shape)-1)//2)
-                    refpreprocessed = equalize_adapthist(refdeconvolved-background, clip_limit=clip_limit)
+                    rb_radius = (min(refdeconvolved.shape)-1)//2 if refdeconvolved.ndim == 3 else 128
+                    if rb_radius < 25:
+                        background = rolling_ball(refdeconvolved, radius=rb_radius)
+                    else:
+                        background = np.zeros_like(refdeconvolved)
+                        # for i in range(refdeconvolved.shape[0]):
+                        #     background[i] = rolling_ball(refdeconvolved[i], radius=rb_radius)
+                    if clip_limit == 0:
+                        refpreprocessed = refdeconvolved-background
+                    else:
+                        refpreprocessed = equalize_adapthist(refdeconvolved-background, clip_limit=clip_limit)
 
-                SELECT_ROI = ref_roi_path is not None
+                SELECT_ROI = not(ref_roi_path in (None, ''))
 
                 roi_polygon = (np.array([[0, 0], [refpreprocessed.shape[0]-1, 0],
                                          [refpreprocessed.shape[0]-1, refpreprocessed.shape[1]-1],
@@ -628,7 +790,10 @@ class TissueImage:
                     if not SELECT_ROI else select_ROI(refpreprocessed, f'{imname}-{roi_name}', ref_roi_path))
 
                 ref_denoise_parameters = calibrate_nlm_denoiser(refpreprocessed)
-                refpreprocessed = mask_ROI(refpreprocessed, roi_polygon)
+                mask, bounds = mask_ROI(refpreprocessed, roi_polygon)
+                refpreprocessed *= np.broadcast_to(mask, refpreprocessed.shape)
+                refpreprocessed = refpreprocessed[bounds]  # reduce non-empty
+
                 # ll, ur = get_maximal_rectangle([roi_polygon])
                 # if SELECT_ROI:
                 #     ll, ur = np.ceil(ll).astype(int), np.floor(ur).astype(int)
@@ -641,7 +806,7 @@ class TissueImage:
                 #     ury -= 1; urx -= 1
 
                 refdenoised = denoise(refpreprocessed, ref_denoise_parameters)
-                np.save(path.join(cache_dir, imname + REF_SUFFIX), refdenoised)
+                zarr.save(path.join(cache_dir, imname + REF_SUFFIX), refdenoised)
 
             self.refdenoised = refdenoised
 
@@ -650,49 +815,65 @@ class TissueImage:
         coords = (factor - roi_polygon) * np.array([-1, 1])
 
         # get the maximally inscribed rectangle
-        ll, ur = None, None
-        try:
-            ll, ur = get_maximal_rectangle([coords])
-        except:
-            i = 0
-            while (
-                (ll is not None or ur is not None)
-                and (ll[0] < 0 or ll[1] < 0 or ur[0] < 0 or ur[1] < 0)
-                and i < coords.shape[0]
-            ):
-                ll, ur = get_maximal_rectangle([coords], i)
-                i += 1
+        # ll, ur = None, None
+        # try:
+        #     ll, ur = get_maximal_rectangle([coords])
+        # except:
+        #     i = 0
+        #     while (
+        #         (ll is not None or ur is not None)
+        #         and (ll[0] < 0 or ll[1] < 0 or ur[0] < 0 or ur[1] < 0)
+        #         and i < coords.shape[0]
+        #     ):
+        #         ll, ur = get_maximal_rectangle([coords], i)
+        #         i += 1
         
-        if (
-            ll is None or ur is None
-            or (ll[0] < 0 or ll[1] < 0 or ur[0] < 0 or ur[1] < 0)
-        ):
-            ll, ur = np.array([roi_polygon[:, 0].min(), roi_polygon[:, 1].min()]), np.array(self.imrect.shape[1:][::-1])-1 + np.array((roi_polygon[:, 0].min(), roi_polygon[:, 1].min()))
-        else:
-            ll = (ll - factor) * np.array([1, -1])
-            ur = (ur - factor) * np.array([1, -1])
+        # if (
+        #     ll is None or ur is None
+        #     or (ll[0] < 0 or ll[1] < 0 or ur[0] < 0 or ur[1] < 0)
+        # ):
+        #     ll, ur = np.array([roi_polygon[:, 0].min(), roi_polygon[:, 1].min()]), np.array(self.imrect.shape[1:][::-1])-1 + np.array((roi_polygon[:, 0].min(), roi_polygon[:, 1].min()))
+        # else:
+        #     ll = (ll - factor) * np.array([1, -1])
+        #     ur = (ur - factor) * np.array([1, -1])
 
-        if select_roi:
-            ll, ur = np.ceil(ll).astype(int), np.floor(ur).astype(int)
-            minx, miny = ll; maxx, maxy = ur
-            minx -= roi_polygon[:, 0].min(); maxx -= roi_polygon[:, 0].min()
-            miny -= roi_polygon[:, 1].min(); maxy -= roi_polygon[:, 1].min()
-        else:
-            miny = 0; minx = 0
-            maxy, maxx = impreprocessed.shape[1:]
-            maxy -= 1; maxx -= 1
-        
+        # if select_roi:
+        #     ll, ur = np.ceil(ll).astype(int), np.floor(ur).astype(int)
+        #     minx, miny = ll; maxx, maxy = ur
+        #     minx -= roi_polygon[:, 0].min(); maxx -= roi_polygon[:, 0].min()
+        #     miny -= roi_polygon[:, 1].min(); maxy -= roi_polygon[:, 1].min()
+        # else:
+        #     miny = 0; minx = 0
+        #     maxy, maxx = impreprocessed.shape[1:]
+        #     maxy -= 1; maxx -= 1
+
+        mask = mask[bounds[-2:]]
+        miny, maxy, minx, maxx = get_maximal_rectangle(mask)
+
         self.in_box = (miny, minx, maxy, maxx)
 
-        denoise_parameters = calibrate_nlm_denoiser(self.imrect[:, miny:maxy, minx:maxx])
+        # # maxrectOverlay
+        # fig, ax = plt.subplots()
+
+        # # Display the image
+        # ax.imshow(mask)
+
+        # # Create a Rectangle patch
+        # rect = patches.Rectangle((minx, miny), maxx-minx, maxy-miny,
+        #                          linewidth=1, edgecolor='r',
+        #                          facecolor='none')
+        # # Add the patch to the Axes
+        # ax.add_patch(rect)
+        # plt.show()
+
+        denoise_parameters = calibrate_nlm_denoiser(impreprocessed[:, miny:maxy, minx:maxx])
         imdenoised = denoise(impreprocessed, denoise_parameters)
-        self.imrect = denoise(self.imrect, denoise_parameters)
 
-        if ref_im_path is not None:
+        if not(ref_im_path in (None, '')):
             imdenoised = match_histograms(imdenoised, refdenoised)
-            self.imrect = match_histograms(self.imrect, refdenoised)
 
-        self.imrect = np.maximum(self.imrect, imdenoised)
+        imdenoised = ndi.median_filter(imdenoised, size=2)
+
         self.imdenoised = imdenoised
 
     def segment(
@@ -956,10 +1137,10 @@ class TissueImage:
             filtered_coords = np.array(filtered_coords)
 
             if 'filtered_coords' in layer_names:
-                data = viewer.layers[layer_names.index('filtered_coords')].data
+                data = viewer.layers['filtered_coords'].data
                 for coord in filtered_coords:
                     if ~(data == coord).all(axis=1).any():
-                        viewer.layers[layer_names.index('filtered_coords')].add(np.round_(coord + ll).astype(np.int64))
+                        viewer.layers['filtered_coords'].add(np.round_(coord + ll).astype(np.int64))
             else:
                 viewer.add_points(filtered_coords + ll, face_color='red', edge_width=0,
                                 opacity=.6, size=5, name='filtered_coords', scale=SCALE)
@@ -997,12 +1178,12 @@ class TissueImage:
             filtered_coords = np.array(filtered_coords)
 
             if 'filtered_coords' in layer_names:
-                data = viewer.layers[layer_names.index('filtered_coords')].data
+                data = viewer.layers['filtered_coords'].data
                 for coord in filtered_coords:
                     coord_to_add = np.round_(coord + ll).astype(np.int64)
                     #TODO: remove extra pts: Clump > 0 ko invert krke mask mai multiply kro aur fir wapis coord mai convert kro
                     if ~(data == coord_to_add).all(axis=1).any():
-                        viewer.layers[layer_names.index('filtered_coords')].add(coord_to_add)
+                        viewer.layers['filtered_coords'].add(coord_to_add)
             else:
                 viewer.add_points(filtered_coords + ll, face_color='red', edge_width=0,
                                 opacity=.6, size=5, name='filtered_coords', scale=SCALE)
@@ -1014,7 +1195,7 @@ class TissueImage:
         def clump_separation_napari():
             SEARCH_LAYER = 'filtered_coords'
             layer_names = [layer.name for layer in viewer.layers]
-            somas_estimates = np.unique(viewer.layers[layer_names.index(SEARCH_LAYER)].data, axis=0)
+            somas_estimates = np.unique(viewer.layers[SEARCH_LAYER].data, axis=0)
             filtered_regions, residue = [], []
             separated_clumps = []
 
@@ -1087,10 +1268,10 @@ class TissueImage:
                 watershed_results[minz:maxz, miny:maxy, minx:maxx] += regions[itr]['image'] * (itr + 1)
 
             if 'reconstructed_labels' in layer_names:
-                viewer.layers[layer_names.index('reconstructed_labels')].data = watershed_results
+                viewer.layers['reconstructed_labels'].data = watershed_results
 
             # After all changes (for reproducibility)
-            final_soma = np.unique(viewer.layers[layer_names.index('filtered_coords')].data, axis=0)
+            final_soma = np.unique(viewer.layers['filtered_coords'].data, axis=0)
 
             # discarded clump ROI: to be subtracted: np.setdiff1d(somas_estimates, final_soma)
             ALL_PT_ESTIMATES, FINAL_PT_ESTIMATES = self.somas_estimates.copy(), final_soma
@@ -1161,12 +1342,12 @@ class TissueImage:
             project_batch(BATCH_NO, N_BATCHES, regions, denoised)
             plt.show()
 
-        self.OBJ_INDEX = 0
+        self.n_region = 0
         extracted_cell = None
         # minz, miny, minx, maxz, maxy, maxx = 0, 0, 0, 0, 0, 0
 
         def plot_single(obj_index):
-            self.OBJ_INDEX = obj_index
+            self.n_region = obj_index
             extracted_cell = extract_obj(regions[obj_index], segmented)
             # minz, miny, minx, maxz, maxy, maxx = regions[obj_index]['bbox']
             projectXYZ(extracted_cell, *self.SCALE)
@@ -1334,6 +1515,243 @@ class TissueImage:
         viewer.window.add_dock_widget(save_approximates, name='Confirm all changes')
         view_single_region()
 
+    def _export(self):
+        img_path = self.im_path
+        low_vol_cutoff = self.LOW_VOLUME_CUTOFF
+        hi_vol_cutoff = self.HIGH_VOLUME_CUTOFF
+        out_type = self.OUT_DIMS
+        tissue_img = self.imdenoised
+        regions = self.regions
+        residue_regions = None
+        seg_type = self.SEGMENT_TYPE
+        roi_name = self.ROI_NAME
+        roi_polygon = self.roi_polygon
+        roi_path = self.ROI_PATH
+        OUT_TYPES = ('3d', 'mip', 'both')
+        SEG_TYPES = ('segmented', 'unsegmented', 'both')
+
+        if out_type not in OUT_TYPES:
+            raise ValueError('`out_type` must be either of `3d`, '
+                            '`mip`, `both`')
+        if seg_type not in SEG_TYPES:
+            raise ValueError('`seg_type` must be either of `segmented`, '
+                            '`unsegmented`, `both`')
+
+        DIR = getcwd() + '/Autocropped/'
+        _mkdir_if_not(DIR)
+
+        IMAGE_NAME = '.'.join(path.basename(img_path).split('.')[:-1])
+        OUT_DIR = self.out_dir
+
+        _mkdir_if_not(OUT_DIR)
+
+        if out_type == OUT_TYPES[2]:
+            if seg_type == SEG_TYPES[2]:
+                _mkdir_if_not(path.join(OUT_DIR, SEG_TYPES[0] + '_' + OUT_TYPES[0]))
+                _mkdir_if_not(path.join(OUT_DIR, SEG_TYPES[0] + '_' + OUT_TYPES[1]))
+                _mkdir_if_not(path.join(OUT_DIR, SEG_TYPES[1] + '_' + OUT_TYPES[0]))
+                _mkdir_if_not(path.join(OUT_DIR, SEG_TYPES[1] + '_' + OUT_TYPES[1]))
+            else:
+                _mkdir_if_not(path.join(OUT_DIR, seg_type + '_' + OUT_TYPES[0]))
+                _mkdir_if_not(path.join(OUT_DIR, seg_type + '_' + OUT_TYPES[1]))
+        else:
+            if seg_type == SEG_TYPES[2]:
+                _mkdir_if_not(path.join(OUT_DIR, SEG_TYPES[0] + '_' + out_type))
+                _mkdir_if_not(path.join(OUT_DIR, SEG_TYPES[1] + '_' + out_type))
+            else:
+                _mkdir_if_not(path.join(OUT_DIR, seg_type + '_' + out_type))
+
+        cell_metadata = {}
+
+        if img_path.split('.')[-1] == 'tif':
+            with tifffile.TiffFile(img_path) as file:
+                metadata = file.imagej_metadata
+                cell_metadata['unit'] = metadata['unit']
+                cell_metadata['spacing'] = metadata['spacing']
+        elif img_path.split('.')[-1] == 'czi':
+            with czifile.CziFile(img_path) as file:
+                metadata = file.metadata(False)['ImageDocument']['Metadata']
+                cell_metadata['scaling'] = metadata['Scaling']
+        cell_metadata['parent_image'] = path.abspath(img_path)
+        cell_metadata['scale'] = self.SCALE
+
+        if roi_polygon is not None:
+            X, Y = _unwrap_polygon(roi_polygon)
+            roi = (int(min(Y)), int(min(X)), int(max(Y) + 1), int(max(X) + 1))
+            cell_metadata['roi_name'] = roi_name
+            cell_metadata['roi'] = roi
+            cell_metadata['roi_path'] = path.abspath(roi_path)
+
+        for (obj, region) in enumerate(regions):
+            if region['vol'] > hi_vol_cutoff:  # for postprocessing
+                minz, miny, minx, maxz, maxy, maxx = region['bbox']
+                segmented = tissue_img[minz:maxz, miny:maxy, minx:maxx].copy()
+                segmented = img_as_ubyte(segmented)
+                segmented[~region['image']] = 0
+
+                try:
+                    markers = _get_blobs(segmented, 'confocal').astype(int)[:, :-1]
+                except:
+                    markers = np.array([np.array(segmented.shape)]) // 2
+                roi = _build_multipoint_roi(markers)
+
+                name = str(uuid.uuid4().hex)
+                out_name = path.join(OUT_DIR, name)
+                self.regions[obj]['name'] = name
+
+                cell_metadata['bounds'] = region['bbox']
+                out_metadata = json.dumps(cell_metadata)
+
+                tifffile.imsave(
+                    out_name + '.tif',
+                    segmented,
+                    description=out_metadata,
+                    software='Autocrop'
+                )
+                tifffile.imsave(
+                    out_name + '_mip.tif',
+                    np.max(segmented, 0),
+                    description=out_metadata,
+                    software='Autocrop'
+                )
+                roi.tofile(out_name + '.roi')
+            if low_vol_cutoff <= region['vol'] <= hi_vol_cutoff:
+                minz, miny, minx, maxz, maxy, maxx = region['bbox']
+                name = str(uuid.uuid4().hex) + '.tif'
+                self.regions[obj]['name'] = name
+
+                # Cell-specific metadata
+                cell_metadata['bounds'] = region['bbox']
+                cell_metadata['cell_volume'] = int(region['vol'])
+                cell_metadata['centroid'] = region['centroid']
+                # cell_metadata['territorial_volume'] = int(region.convex_area)
+                out_metadata = json.dumps(cell_metadata)
+
+                if seg_type == SEG_TYPES[0] or seg_type == SEG_TYPES[2]:
+                    segmented = tissue_img[minz:maxz, miny:maxy, minx:maxx].copy()
+                    segmented[~region['image']] = 0
+                    segmented = segmented / segmented.max()  # contrast stretch
+                    segmented = img_as_ubyte(segmented)
+
+                    if out_type == OUT_TYPES[2]:
+                        out = segmented
+                        out_name = path.join(OUT_DIR, f'{SEG_TYPES[0]}_{OUT_TYPES[0]}', name)
+                        tifffile.imsave(out_name, out, description=out_metadata,
+                                        software='Autocrop')
+
+                        out = np.pad(np.max(segmented, 0),
+                                    pad_width=max(segmented.shape[1:]) // 5,
+                                    mode='constant')
+                        out_name = path.join(OUT_DIR, f'{SEG_TYPES[0]}_{OUT_TYPES[1]}', name)
+                        tifffile.imsave(out_name.replace('.tif', '_mip.tif'), out,
+                                        description=out_metadata,
+                                        software='Autocrop')
+                    else:
+                        out = segmented if out_type == OUT_TYPES[0] else np.pad(
+                            np.max(segmented, 0),
+                            pad_width=max(segmented.shape[1:]) // 5,
+                            mode='constant')
+                        out_name = path.join(OUT_DIR, f'{SEG_TYPES[0]}_{out_type}', name)
+                        tifffile.imsave(out_name.replace('.tif', '_mip.tif'), out,
+                                        description=out_metadata,
+                                        software='Autocrop')
+
+                if seg_type == SEG_TYPES[1] or seg_type == SEG_TYPES[2]:
+                    scale_z = (maxz - minz) // 5
+                    scale_y = (maxy - miny) // 5
+                    scale_x = (maxx - minx) // 5
+                    minz = max(0, minz - scale_z)
+                    miny = max(0, miny - scale_y)
+                    minx = max(0, minx - scale_x)
+                    maxz += scale_z
+                    maxy += scale_y
+                    maxx += scale_x
+
+                    segmented = tissue_img[minz:maxz, miny:maxy, minx:maxx].copy()
+                    # contrast stretch
+                    minv, maxv = segmented.min(), segmented.max()
+                    segmented = (segmented - minv) / (maxv - minv)
+
+                    segmented = img_as_ubyte(segmented)
+
+                    if out_type == OUT_TYPES[2]:
+                        out = segmented
+                        out_name = path.join(OUT_DIR, f'{SEG_TYPES[1]}_{OUT_TYPES[0]}', name)
+                        tifffile.imsave(out_name, out, description=out_metadata,
+                                        software='Autocrop')
+
+                        out = np.max(segmented, 0)
+                        out_name = path.join(OUT_DIR, f'{SEG_TYPES[1]}_{OUT_TYPES[1]}', name)
+                        tifffile.imsave(out_name, out, description=out_metadata,
+                                        software='Autocrop')
+                    else:
+                        out = segmented if out_type == OUT_TYPES[0] else np.max(
+                            segmented, 0)
+                        out_name = path.join(OUT_DIR, f'{SEG_TYPES[1]}_{out_type}', name)
+                        tifffile.imsave(out_name, out, description=out_metadata,
+                                        software='Autocrop')
+
+        if residue_regions is not None:
+            RES_DIR = path.join(OUT_DIR, 'residue')
+            _mkdir_if_not(RES_DIR)
+            for (obj, region) in enumerate(residue_regions):
+                if low_vol_cutoff <= region['vol']:  # for postprocessing
+                    minz, miny, minx, maxz, maxy, maxx = region['bbox']
+                    segmented = tissue_img[minz:maxz, miny:maxy, minx:maxx].copy()
+                    segmented[~region['image']] = 0
+                    segmented = segmented / segmented.max()  # contrast stretch
+                    segmented = img_as_ubyte(segmented)
+
+                    try:
+                        markers = _get_blobs(segmented, 'confocal')
+                        markers = markers.astype(int)[:, :-1]
+                    except:
+                        markers = np.array([np.array(segmented.shape)]) // 2
+                        markers = markers[:, [0, 2, 1]]
+                    roi = _build_multipoint_roi(markers)
+
+                    name = str(uuid.uuid4().hex)
+                    out_name = path.join(RES_DIR, name)
+
+                    cell_metadata['bounds'] = region['bbox']
+                    out_metadata = json.dumps(cell_metadata)
+
+                    tifffile.imsave(
+                        out_name + '.tif',
+                        segmented,
+                        description=out_metadata,
+                        software='Autocrop'
+                    )
+                    tifffile.imsave(
+                        out_name + '_mip.tif',
+                        np.max(segmented, 0),
+                        description=out_metadata,
+                        software='Autocrop'
+                    )
+                    roi.tofile(out_name + '.roi')
+
+        params = {
+            'NAME_ROI': self.ROI_NAME,
+            'REF_IM_PATH': pathlib2.Path(self.REF_IM_PATH).as_posix(),
+            'skip_preprocess': self.skip_preprocess,
+            'DECONV_ITR': self.DECONV_ITR,
+            'CLIP_LIMIT': self.CLIP_LIMIT,
+            'LOW_THRESH': self.LOW_THRESH,
+            'HIGH_THRESH': self.HIGH_THRESH,
+            'LOW_AUTO_THRESH': self.LOW_AUTO_THRESH,
+            'HIGH_AUTO_THRESH': self.HIGH_AUTO_THRESH,
+            'LOW_VOLUME_CUTOFF': self.LOW_VOLUME_CUTOFF,  # filter noise/artifacts
+            'HIGH_VOLUME_CUTOFF': self.HIGH_VOLUME_CUTOFF,  # filter cell clusters
+            'SEGMENT_TYPE': self.SEGMENT_TYPE,
+            'OUTPUT_DIMS': self.OUT_DIMS,
+        }
+
+        with open(path.join(self.out_dir, '.params.json'), 'w') as out:
+            json.dump(params, out)
+
+        zarr.save(path.join(self.out_dir, '.label_diff.zarr'), self.label_diff)
+        zarr.save(path.join(self.out_dir, '.somas_coords.zarr'), self.FINAL_PT_ESTIMATES)
+
     def export_cropped(
         self,
         low_volume_cutoff=None,
@@ -1406,6 +1824,8 @@ class TissueImage:
             params = {
                 'NAME_ROI': self.ROI_NAME,
                 'REF_IM_PATH': self.REF_IM_PATH,
+                'skip_preprocess': self.skip_preprocess,
+                'DECONV_ITR': self.DECONV_ITR,
                 'CLIP_LIMIT': self.CLIP_LIMIT,
                 'LOW_THRESH': self.LOW_THRESH,
                 'HIGH_THRESH': self.HIGH_THRESH,
@@ -1417,15 +1837,11 @@ class TissueImage:
                 'OUTPUT_DIMS': self.OUT_DIMS,
             }
 
-            DIR = getcwd() + '/Autocropped/'
-            OUT_DIR = DIR + only_name(self.im_path) + \
-                    f'{"" if self.ROI_NAME == "" else "-" + str(self.ROI_NAME)}/'
-
-            with open(OUT_DIR + '.params.json', 'w') as out:
+            with open(self.out_dir + '.params.json', 'w') as out:
                 json.dump(params, out)
 
             out = np.array([self.ALL_PT_ESTIMATES, self.FINAL_PT_ESTIMATES])
-            np.save(OUT_DIR + '.somas_estimates.npy', out)
+            np.save(self.out_dir + '.somas_estimates.npy', out)
 
         if gui:
             viewer = napari.Viewer(ndisplay=3)

@@ -82,16 +82,13 @@ def mask_ROI(im, linebuilder):
         X, Y = linebuilder[0], linebuilder[1]
     min_x, max_x = int(min(X)), int(max(X) + 1)
     min_y, max_y = int(min(Y)), int(max(Y) + 1)
+    bounds = []
+    if im.ndim == 3:
+        bounds.append(slice(0, im.shape[0]))
+    bounds.extend((slice(min_y, max_y), slice(min_x, max_x)))
     coords = np.hstack((x.reshape(-1, 1), y.reshape(-1, 1)))
 
     mask = poly_path.contains_points(coords)
     mask = mask.reshape(im.shape[1], im.shape[2])
 
-    out = np.empty(im.shape)
-    for i in range(im.shape[0]):
-        out[i] = im[i] * mask
-
-    # reduce non-empty
-    im_masked = out[:, min_y: max_y, min_x:max_x]
-
-    return im[:, min_y: max_y, min_x:max_x], im_masked
+    return mask, tuple(bounds)
