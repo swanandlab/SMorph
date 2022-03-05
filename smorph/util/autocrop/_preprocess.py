@@ -56,10 +56,13 @@ def denoise(img, denoise_parameters):
         Denoised image data.
 
     """
-    denoised = np.zeros(img.shape, dtype=np.float64)
+    denoised = np.empty_like(img, dtype=np.float64)
 
-    for i in range(denoised.shape[0]):
-        denoised[i] = denoise_nl_means(img[i], **denoise_parameters)
+    if img.ndim > 2:
+        for i in range(denoised.shape[0]):
+            denoised[i] = denoise_nl_means(img[i], **denoise_parameters)
+    else:
+        denoised = denoise_nl_means(img, **denoise_parameters)
 
     # denoised = imnorm(denoised)
     return denoised
