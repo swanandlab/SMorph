@@ -1,11 +1,19 @@
 import numpy as np
+
+from scipy import sparse
 from scipy.ndimage import generate_binary_structure, label
 from skan import skeleton_to_csgraph
-from skan.csr import branch_statistics, make_degree_image
+from skan.csr import (
+    branch_statistics,
+    make_degree_image,
+    Skeleton,
+    summarize,
+)
 from skimage.feature import blob_log
-from skimage.morphology import convex_hull_image
-from skimage.util import invert
 from skimage.graph import central_pixel, pixel_graph
+from skimage.morphology import convex_hull_image
+from skimage.segmentation import relabel_sequential
+from skimage.util import invert
 
 
 def _get_blobs(cell_image, image_type):
@@ -204,19 +212,106 @@ def _eliminate_loops(branch_stats, paths_list):
     return new_branch_stats, new_paths_list
 
 
-def get_soma_on_skeleton(cell_image, image_type, cell_skeleton):
+def _simplify_graph(skel):
+    """Iterative removal of all nodes of degree 2 while reconnecting their
+    edges.
+
+    Parameters
+    ----------
+    skel : skan.csr.Skeleton
+        A Skeleton object containing graph to be simplified.
+
+    Returns
+    -------
+    simp_csgraph : scipy.sparse.csr_matrix
+        A sparse adjacency matrix of the simplified graph.
+    reduced_nodes : tuple of int
+        The index nodes of original graph in simplified graph.
+    """
+    summary = summarize(skel)
+    src = np.asarray(summary['node-id-src'])
+    dst = np.asarray(summary['node-id-dst'])
+    distance = np.asarray(summary['branch-distance'])
+
+    # to reduce the size of simplified graph
+    _, fw, inv = relabel_sequential(np.append(src, dst))
+    src_relab, dst_relab = fw[src], fw[dst]
+
+    n_nodes = max(np.max(src_relab), np.max(dst_relab))
+
+    edges = sparse.coo_matrix(
+            (distance, (src_relab - 1, dst_relab - 1)),
+            shape=(n_nodes, n_nodes)
+            )
+    dir_csgraph = edges.tocsr()
+    simp_csgraph = dir_csgraph + dir_csgraph.T  # make undirected
+
+    reduced_nodes = inv[np.arange(1, simp_csgraph.shape[0] + 1)]
+
+    return simp_csgraph, reduced_nodes
+
+
+def _fast_graph_center_idx(skel):
+    """Accelerated graph center finding using simplified graph.
+
+    Parameters
+    ----------
+    skel : skan.csr.Skeleton
+        A Skeleton object containing graph whose center is to be found.
+
+    Returns
+    -------
+    original_center_idx : int
+        The index of central node of graph.
+    """
+    simp_csgraph, reduced_nodes = _simplify_graph(skel)
+    simp_center_idx, _ = central_pixel(simp_csgraph)
+    original_center_idx = reduced_nodes[simp_center_idx]
+
+    return original_center_idx
+
+
+def get_soma_on_skeleton(cell):
     """Retrieves soma's position on cell skeleton."""
     # soma = _get_soma(cell_image, image_type)
-    if cell_image.ndim == 2:
-        # skeleton_pixel_coordinates = [(i, j) for (
-        #     i, j), val in np.ndenumerate(cell_skeleton) if val != 0]
-        g, nodes = pixel_graph(cell_skeleton, connectivity=cell_image.ndim)
-        soma_on_skeleton, distances = central_pixel(
-            g, nodes=nodes, shape=cell_image.shape, partition_size=100)
+    # if cell_image.ndim == 2:
+    #     skeleton_pixel_coordinates = [(i, j) for (
+    #         i, j), val in np.ndenumerate(cell_skeleton) if val != 0]
+    # g, nodes = pixel_graph(cell_skeleton, connectivity=cell_image.ndim)
+    # soma_on_skeleton, distances = central_pixel(
+    #     g, nodes=nodes, shape=cell_image.shape, partition_size=100)
+            # filter blobs with forks
+    cell_image, image_type = cell.image, cell.image_type
+    skel = cell._skeleton
+
+    # soma finding
+    original_center_idx = _fast_graph_center_idx(skel)
+
+    neighbors = [original_center_idx]
+    original_center_idx = neighbors.pop(0)
+
+    itr = 0
+    ITR_CUTOFF = 100
+    while (
+        cell_image[tuple(skel.coordinates[original_center_idx].astype(int))] == 0
+        and itr < ITR_CUTOFF
+    ):
+        if len(neighbors) == 0:
+            neighbors = list(skel.nbgraph.neighbors(original_center_idx))
+        original_center_idx = neighbors.pop(0)
+        itr += 1
+
+    if itr < ITR_CUTOFF:
+        soma_on_skeleton = skel.coordinates[original_center_idx].astype(int)
     else:
+        print('Blob detection')
         soma = np.asarray(_get_soma(cell_image, image_type))
-        skeleton_pixel_coordinates = [(i, j, k) for (
-            i, j, k), val in np.ndenumerate(cell_skeleton) if val != 0]
+        if cell_image.ndim == 2:
+            skeleton_pixel_coordinates = [(i, j, k) for (
+                i, j, k), val in np.ndenumerate(cell.skeleton) if val != 0]
+        else:
+            skeleton_pixel_coordinates = [(i, j) for (
+            i, j), val in np.ndenumerate(cell.skeleton) if val != 0]
         skeleton_pixel_coordinates = np.asarray(skeleton_pixel_coordinates)
         amin = np.argmin(np.linalg.norm(skeleton_pixel_coordinates-soma, axis=1))
         soma_on_skeleton = skeleton_pixel_coordinates[amin]

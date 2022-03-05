@@ -29,7 +29,7 @@ from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
 
 from ..util._io import (
     df_to_csv,
-    read_group_folders,
+    read_group_dirs,
     silent_remove_file,
     mkdir_if_not,
     savefig
@@ -62,25 +62,12 @@ _ALL_FEATURE_NAMES = (
     'regression_intercept')
 
 
-def _analyze_cells(
-    group_folders,
-    img_type,
-    segmented,
-    scale,
-    contrast_ptiles,
-    threshold_method,
-    sholl_step_sz,
-    poly_degree,
-    save_results,
-    show_logs,
-    fig_format,
-    labels
-):
+def _analyze_cells(groups):
     """Performs complete reading &thre feature extraction for groups of cells.
 
     Parameters
     ----------
-    group_folders : list
+    group_dirs : list
         A list of strings containing path of each folder with image dataset.
     img_type : str
         Neuroimaging technique used to get image data of neuronal cell,
@@ -124,9 +111,23 @@ def _analyze_cells(
         Names of each cell image file.
 
     """
-    file_names, dataset = read_group_folders(group_folders)
+    group_dirs = groups.group_dirs
+    img_type = groups.image_type
+    segmented = groups.segmented
+    scale = groups.scale
+    contrast_ptiles = groups.contrast_ptiles
+    threshold_method = groups.threshold_method
+    sholl_step_sz = groups.sholl_step_size
+    poly_degree = groups.polynomial_degree
+    save_results = groups.save
+    show_logs = groups.show_logs
+    fig_format = groups.fig_format
+    labels = groups.labels
+    out_dir = groups.out_dir
+
+    file_names, dataset = read_group_dirs(group_dirs)
     SKIPPED_CELLS_FILENAME = 'skipped_cells.txt'
-    FEATURES_DIR, FEATURES_FILE_NAME = '/Results/', 'features.csv'
+    FEATURES_FILE_NAME = 'features.csv'
 
     dataset_features, targets = [], []
 
@@ -136,7 +137,7 @@ def _analyze_cells(
     group_cnts = []
     bad_cells_idx = []
     cell_cnt = 0
-    N_GROUPS = len(group_folders)
+    N_GROUPS = len(group_dirs)
 
     silent_remove_file(SKIPPED_CELLS_FILENAME)
     # PROCESSED_DIR = 'Results/processed/'
@@ -150,7 +151,11 @@ def _analyze_cells(
 
             cell_cnt += 1
             try:
-                cell = Cell(cell_image, img_type, scale,
+                # metadata = tifffile.TiffFile(file_names[cell_cnt-1]).pages[
+                #                 0].tags['ImageDescription'].value
+                # metadata = json.loads(metadata)
+                mscale = scale # metadata['scale'][-cell_image.ndim:]
+                cell = Cell(cell_image, img_type, mscale,
                             segmented=segmented,
                             contrast_ptiles=contrast_ptiles,
                             threshold_method=threshold_method,
@@ -192,11 +197,13 @@ def _analyze_cells(
                 dataset_features.append(cell_features)
 
                 if save_results:
-                    DIR = getcwd() + FEATURES_DIR
+                    DIR = path.join(getcwd(), out_dir)
                     folder = file_names[cell_cnt-1].split('/')[-2]
-                    mkdir_if_not(DIR + folder)
-                    im_name = DIR + folder + '/' + '.'.join(file_names[
-                        cell_cnt-1].split('/')[-1].split('.')[:-1])
+                    mkdir_if_not(path.join(DIR, folder))
+                    im_name = path.join(DIR, folder,
+                        '.'.join(file_names[
+                            cell_cnt-1].split('/')[-1].split('.')[:-1])
+                    )
                     if cell.image.ndim == 2:
                         fig, ax = plt.subplots(figsize=(8, 8))
                         ax.imshow(cell.image, cmap='gray')
@@ -213,9 +220,9 @@ def _analyze_cells(
                         color_branches_coords = []
                         for branch_level in branching_structure:
                             single_branch_level = []
-                            for path in branch_level:
+                            for brpath in branch_level:
                                 path_coords = []
-                                for node in path:
+                                for node in brpath:
                                     path_coords.append(coords[node])
                                     single_branch_level.extend(path_coords)
                             color_branches_coords.append(single_branch_level)
@@ -232,7 +239,7 @@ def _analyze_cells(
                         ax.plot(cell.skel_soma[1],
                                  cell.skel_soma[0], 'b.', alpha=.5)
 
-                        radius = cell.sholl_step_size/scale[-1]
+                        radius = cell.sholl_step_size/mscale[-1]
                         intersections = cell._sholl_intersections
                         radii = np.arange(radius,
                             (len(intersections)+1)*radius, radius)
@@ -256,12 +263,13 @@ def _analyze_cells(
         all_labels = [labels[i] for i in range(len(group_cnts))
                       for j in range(group_cnts[i])]
         features = DataFrame(dataset_features, columns=_ALL_FEATURE_NAMES)
+        groups.bad_cell_indices = bad_cells_idx
 
         if save_results:
             out_features = features.copy()
             out_features.insert(0, 'cell_image_file', tmp_fnames)
             out_features.insert(0, 'label', all_labels)
-            df_to_csv(out_features, FEATURES_DIR, FEATURES_FILE_NAME)
+            df_to_csv(out_features, out_dir, FEATURES_FILE_NAME)
 
     file_names = [cell_name for idx, cell_name in enumerate(file_names)
                   if idx not in bad_cells_idx]
@@ -277,7 +285,7 @@ def _analyze_cells(
         out_features = features.copy()
         out_features.insert(0, 'cell_image_file', file_names)
         out_features.insert(0, 'label', all_labels)
-        df_to_csv(out_features, FEATURES_DIR, FEATURES_FILE_NAME)
+        df_to_csv(out_features, out_dir, FEATURES_FILE_NAME)
 
     return (features, targets, sholl_original_plots, sholl_polynomial_plots,
             group_cnts, file_names)
@@ -292,7 +300,7 @@ class Groups:
 
     Parameters
     ----------
-    group_folders : list
+    group_dirs : list
         Path to folders containing input cell images with each path
         corresponding to different subgroups.
     image_type : str
@@ -353,14 +361,18 @@ class Groups:
         Principal Components.
 
     """
-    __slots__ = ('features', 'targets', 'sholl_original_plots', 'labels',
+    __slots__ = ('group_dirs', 'image_type', 'segmented', "contrast_ptiles",
+                 "threshold_method", "sholl_step_size", "polynomial_degree",
+                 "scale", "show_logs", "out_dir", "fig_format",
+                 "bad_cell_indices",
+                 'features', 'targets', 'sholl_original_plots', 'labels',
                  'sholl_polynomial_plots', 'pca_feature_names', 'markers',
                  'feature_significance', 'file_names', 'group_counts',
-                 'projected', 'sholl_step_size', 'save', 'scale', 'fig_format')
+                 'projected', 'save')
 
     def __init__(
         self,
-        group_folders,
+        group_dirs,
         image_type,
         segmented=False,
         labels=None,
@@ -371,12 +383,25 @@ class Groups:
         polynomial_degree=3,
         save_results=True,
         show_logs=False,
+        out_dir="Results/",
         fig_format='png'
     ):
+        self.group_dirs = group_dirs
+        self.image_type = image_type
+        self.segmented = segmented
+        self.scale = scale
+        self.contrast_ptiles = contrast_ptiles
+        self.sholl_step_size = sholl_step_size
+        self.polynomial_degree = polynomial_degree
+        self.threshold_method = threshold_method
+        self.show_logs = show_logs
+        self.fig_format = fig_format
+
         self.labels = list((labels if labels is not None
-                            else [path.basename(f) for f in group_folders]))
+                            else [path.basename(f) for f in group_dirs]))
         self.sholl_step_size = sholl_step_size
         self.save = save_results
+        self.out_dir = out_dir
 
         (
             self.features,
@@ -385,14 +410,11 @@ class Groups:
             self.sholl_polynomial_plots,
             self.group_counts,
             self.file_names
-        ) = _analyze_cells(group_folders, image_type, segmented, scale,
-                           contrast_ptiles, threshold_method, sholl_step_size,
-                           polynomial_degree, save_results, show_logs, fig_format, self.labels)
+        ) = _analyze_cells(self)
 
         self.pca_feature_names = None
         self.markers = None
         self.feature_significance = None
-        self.fig_format = fig_format
 
     def plot_avg_sholl_plot(
         self,
@@ -1231,7 +1253,7 @@ class Groups:
                                         description=out_metadata)
 
         if export_clustered_cells:
-            DIR = getcwd() + '/Results/clustered_cells/'
+            DIR = path.join(getcwd(), '/Results/clustered_cells/')
             if path.exists(DIR) and path.isdir(DIR):
                 rmtree(DIR)
             mkdir(DIR)

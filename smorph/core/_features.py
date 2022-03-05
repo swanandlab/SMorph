@@ -54,8 +54,7 @@ def _extract_cell_features(cell, shell_step_size, polynomial_degree):
     convex_hull = get_convex_hull(cell)
     n_forks = get_no_of_forks(cell)
 
-    soma_on_skeleton = get_soma_on_skeleton(
-        cell.image, cell.image_type, cell_skeleton)
+    soma_on_skeleton = get_soma_on_skeleton(cell)
 
     (
         padded_skeleton,
