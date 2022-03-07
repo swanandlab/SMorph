@@ -3,8 +3,17 @@ import psf
 import skimage
 import numpy as np
 
-from skimage.restoration import (calibrate_denoiser, denoise_nl_means,
-                                 estimate_sigma)
+from skimage.exposure import (
+    equalize_adapthist,
+    match_histograms,
+)
+from skimage.restoration import (
+    calibrate_denoiser,
+    denoise_nl_means,
+    estimate_sigma,
+    richardson_lucy,
+    rolling_ball,
+)
 
 from .util import (
     imnorm,
@@ -68,20 +77,20 @@ def denoise(img, denoise_parameters):
     return denoised
 
 
-def deconvolve(img, impath, iters=8, pinhole_shape='round'):
+def deconvolve(pipe, iters=8, **kwargs):
     """Do in-place deconvolution.
 
     Parameters
     ----------
-    img : ndarray
-        Image data.
-    impath : str
-        Path to the original image file.
+    # img : ndarray
+    #     Image data.
+    # impath : str
+    #     Path to the original image file.
     iters : int, optional
         Number of iterations for deconvolution, by default 8
-    pinhole_shape : str, optional
-        Shape of the pinhole of the confocal microscope. Either 'round' or
-        'square', by default 'round'
+    # pinhole_shape : str, optional
+    #     Shape of the pinhole of the confocal microscope. Either 'round' or
+    #     'square', by default 'round'
 
     Returns
     -------
@@ -89,46 +98,45 @@ def deconvolve(img, impath, iters=8, pinhole_shape='round'):
         Deconvolved image data.
 
     """
-    impath = impath.lower()
-    if impath.split('.')[-1] == 'czi':
-        czimeta = czifile.CziFile(impath).metadata(False)
-        metadata = czimeta['ImageDocument']['Metadata']
-        im_meta = metadata['Information']['Image']
-        refr_index = im_meta['ObjectiveSettings']['RefractiveIndex']
+    img = pipe.impreprocessed
+    impath = pipe.im_path.lower()
+    dim_z = pipe.SCALE[0]
+    dim_r = pipe.SCALE[-1]
 
-        selected_channel = None
-        for i in im_meta['Dimensions']['Channels']['Channel']:
-            if i['ContrastMethod'] == 'Fluorescence':
-                selected_channel = i
-        ex_wavelen = selected_channel['ExcitationWavelength']
-        em_wavelen = selected_channel['EmissionWavelength']
-
-        selected_detector = None
-        for i in metadata['Experiment']['ExperimentBlocks']['AcquisitionBlock'
-            ]['MultiTrackSetup']['TrackSetup']['Detectors']['Detector']:  # [channel]['Detectors']['Detector']:
-            if i['PinholeDiameter'] > 0:
-                selected_detector = i
-        pinhole_radius = selected_detector['PinholeDiameter'] / 2 * 1e6
-
-        num_aperture = metadata['Information']['Instrument']['Objectives'][
-            'Objective']['LensNA']
-        dim_r = metadata['Scaling']['Items']['Distance'][0]['Value'] * 1e6
-        dim_z = metadata['Scaling']['Items']['Distance'][-1]['Value'] * 1e6
-
+    if (
+        kwargs.get('ex_wavelen') and kwargs.get('ex_wavelen')
+        and kwargs.get('num_aperture') and kwargs.get('refr_index')
+        and kwargs.get('pinhole_radius') and kwargs.get('pinhole_shape')
+    ):
         args = dict(
             shape=(3, 3),  # # of samples in z & r direction
-            dims=(dim_z, dim_r),  # size in z & r direction in microns
-            ex_wavelen=ex_wavelen,  # nm
-            em_wavelen=em_wavelen,  # nm
-            num_aperture=num_aperture,
-            refr_index=refr_index,
-            pinhole_radius=pinhole_radius,  # microns
-            pinhole_shape=pinhole_shape
+            dims=(dim_z, dim_r),  # size in z & r direction in microns (very important)
+            ex_wavelen=kwargs['ex_wavelen'],  # nm
+            em_wavelen=kwargs['em_wavelen'],  # nm
+            num_aperture=kwargs['num_aperture'],
+            refr_index=kwargs['refr_index'],
+            pinhole_radius=kwargs['pinhole_radius'],  # microns
+            pinhole_shape=kwargs['pinhole_shape']
         )
         obsvol = psf.PSF(psf.ISOTROPIC | psf.CONFOCAL, **args)
         impsf = obsvol.volume()
 
-        img = skimage.restoration.richardson_lucy(img, impsf, num_iter=iters)
-        img = (img - img.min()) / (img.max() - img.min())
+        img = richardson_lucy(img, impsf, num_iter=iters)
+
+    img = (img - img.min()) / (img.max() - img.min())
 
     return img
+
+
+def subtract_background(im, radius=50):
+    bg = np.empty_like(im)
+
+    for i in range(im.shape[0]):
+        bg[i] = rolling_ball(im[i], radius=radius)
+
+    return im - bg
+
+
+def equalize(im, clip_limit=.01):
+    equalized = equalize_adapthist(im, clip_limit=clip_limit)
+    return equalized

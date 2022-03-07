@@ -625,11 +625,11 @@ class TissueImage:
 
     """
     __slots__ = ('im_path', 'DECONV_ITR', 'CLIP_LIMIT', 'ROI_PATH', 'ROI_NAME',
-            'SCALE', 'imoriginal', 'imdenoised', 'imsegmented', 'labels',
+            'SCALE', 'imoriginal', 'impreprocessed', 'imsegmented', 'labels', 'imbinary',
             'REF_IM_PATH', 'REF_ROI_PATH', 'refdenoised', "skip_preprocess",
-            'roi_polygon', 'in_box', 'regions', 'residue', 'out_dir',
+            'roi_polygon', 'in_box', 'regions', 'residue', 'OUT_DIR',
             'LOW_THRESH', 'HIGH_THRESH', 'LOW_AUTO_THRESH', 'HIGH_AUTO_THRESH',
-            'CACHE_DIR', 'n_region', 'PROPS', 'metadata',
+            'n_region', 'PROPS', 'metadata',
             'filtered_regions',  # watershed cache
             'LOW_VOLUME_CUTOFF', 'HIGH_VOLUME_CUTOFF', 'OUT_DIMS', 'SEGMENT_TYPE',  # export cells
             'label_diff',  # reproducibility of manual label refinement
@@ -641,12 +641,9 @@ class TissueImage:
         im_path,
         roi_path=None,
         roi_name=None,
-        skip_preprocess=False,
-        deconv_itr=20,
-        clip_limit=.02,
         ref_im_path=None,
         ref_roi_path=None,
-        cache_dir='Cache',
+        out_dir='Autocropped',
         ex_wavelen=None,
         em_wavelen=None,
         num_aperture=None,
@@ -660,16 +657,13 @@ class TissueImage:
             raise ValueError('Load ROI properly')
         self.im_path = im_path
         self.REF_IM_PATH = ref_im_path
-        imoriginal, SCALE, metadata = imread(im_path)
+        imoriginal, SCALE, metadata = imread(im_path, ref_im_path)
         self.imoriginal, self.SCALE = imoriginal, SCALE
+        self.impreprocessed = imoriginal
         self.metadata = metadata
         self.ROI_PATH = roi_path
         self.REF_ROI_PATH = ref_roi_path
         self.ROI_NAME = roi_name
-        self.CACHE_DIR = cache_dir
-        self.DECONV_ITR = deconv_itr
-        self.CLIP_LIMIT = clip_limit
-        self.skip_preprocess=skip_preprocess
         self.labels = None
         self.regions = None
         self.residue = None
@@ -678,6 +672,14 @@ class TissueImage:
         self.FINAL_PT_ESTIMATES = None
         self.n_region = None
 
+        DIR = path.join(getcwd(), out_dir)
+        OUT_DIR = path.join(DIR, only_name(self.im_path) + \
+                f'{"" if self.ROI_NAME == "" else "-" + str(self.ROI_NAME)}/')
+        self.OUT_DIR = OUT_DIR
+        _mkdir_if_not(OUT_DIR)
+        _mkdir_if_not(path.join(OUT_DIR, '.cache'))
+
+    def _suppl(self):
         cached_filename = only_name(im_path) + '.zarr'
         cached = False
 
@@ -692,12 +694,7 @@ class TissueImage:
                     raise ValueError('Preprocessed image not cached')
             except:
                 cached = False
-                imdeconvolved = deconvolve(imoriginal, im_path, iters=deconv_itr,
-                                           ex_wavelen=ex_wavelen,
-                                           em_wavelen=em_wavelen,
-                                           num_aperture=num_aperture,
-                                           refr_index=refr_index,
-                                           pinhole_radius=pinhole_radius)
+                imdeconvolved = deconvolve(imoriginal, im_path, iters=deconv_itr)
 
         imshape = imdeconvolved.shape
 
@@ -714,12 +711,9 @@ class TissueImage:
                 for i in range(imdeconvolved.shape[0]):
                     background[i] = rolling_ball(imdeconvolved[i], radius=rb_radius)
 
-            if clip_limit == 0:
-                impreprocessed = imdeconvolved-background
-            else:
-                impreprocessed = equalize_adapthist(impreprocessed,
-                    clip_limit=clip_limit
-                    )
+            impreprocessed = equalize_adapthist(imdeconvolved-background,
+                clip_limit=clip_limit
+                )
 
             zarr.save(f"{cache_dir}/{cached_filename}", impreprocessed)
 
@@ -740,11 +734,6 @@ class TissueImage:
             impreprocessed *= np.broadcast_to(mask, impreprocessed.shape)
             impreprocessed = impreprocessed[bounds]
         self.imoriginal = imoriginal
-
-        DIR = path.join(getcwd(), 'Autocropped')
-        OUT_DIR = path.join(DIR, only_name(self.im_path) + \
-                f'{"" if self.ROI_NAME == "" else "-" + str(self.ROI_NAME)}/')
-        self.out_dir = OUT_DIR
 
         # Load reference
         if not(ref_im_path in (None, '')):
@@ -775,8 +764,8 @@ class TissueImage:
                         background = rolling_ball(refdeconvolved, radius=rb_radius)
                     else:
                         background = np.zeros_like(refdeconvolved)
-                        # for i in range(refdeconvolved.shape[0]):
-                        #     background[i] = rolling_ball(refdeconvolved[i], radius=rb_radius)
+                        for i in range(refdeconvolved.shape[0]):
+                            background[i] = rolling_ball(refdeconvolved[i], radius=rb_radius)
                     if clip_limit == 0:
                         refpreprocessed = refdeconvolved-background
                     else:
@@ -887,14 +876,14 @@ class TissueImage:
         """."""
         miny, minx, maxy, maxx = self.in_box
         if low_auto_thresh is not None:
-            low_thresh = eval(f'threshold_{low_auto_thresh}(self.imdenoised[:, miny:maxy, minx:maxx])')
+            low_thresh = eval(f'threshold_{low_auto_thresh}(self.impreprocessed[:, miny:maxy, minx:maxx])')
         if high_auto_thresh is not None:
-            high_thresh = eval(f'threshold_{high_auto_thresh}(self.imdenoised[:, miny:maxy, minx:maxx])')
+            high_thresh = eval(f'threshold_{high_auto_thresh}(self.impreprocessed[:, miny:maxy, minx:maxx])')
         self.LOW_THRESH, self.HIGH_THRESH = low_thresh, high_thresh
         self.LOW_AUTO_THRESH = low_auto_thresh
         self.HIGH_AUTO_THRESH = high_auto_thresh
 
-        thresholded = threshold(self.imdenoised, low_thresh, high_thresh)
+        thresholded = threshold(self.impreprocessed, low_thresh, high_thresh)
         labels = label_thresholded(thresholded)
 
         prefiltering_volume = thresholded.sum()
@@ -911,7 +900,7 @@ class TissueImage:
             filtered_labels[minz:maxz, miny:maxy, minx:maxx] += region['image'] * reg_itr
             reg_itr += 1
 
-        self.imsegmented = self.imdenoised * (filtered_labels > 0)
+        self.imsegmented = self.impreprocessed * (filtered_labels > 0)
         self.labels = filtered_labels
         self.regions = regions
 
@@ -926,7 +915,7 @@ class TissueImage:
         if gui:
             SCALE = self.SCALE
             viewer = napari.Viewer(ndisplay=3)
-            viewer.add_image(self.imdenoised, scale=SCALE)
+            viewer.add_image(self.impreprocessed, scale=SCALE)
             viewer.add_labels(self.labels, rendering='translucent', opacity=.5, scale=SCALE)
 
             region_props = PyQt5.QtWidgets.QLabel()
@@ -963,7 +952,7 @@ class TissueImage:
                         filtered_regions.append(region)
                 viewer.layers[layer_names.index('Labels')].data = self.labels
                 self.regions = filtered_regions
-                self.imsegmented = self.imdenoised * (self.labels > 0)
+                self.imsegmented = self.impreprocessed * (self.labels > 0)
                 select_region()
 
             @magicgui(
@@ -1016,7 +1005,7 @@ class TissueImage:
                     itr += 1
                     filtered_regions.append(region)
             self.regions = filtered_regions
-            self.imsegmented = self.imdenoised * (self.labels > 0)
+            self.imsegmented = self.impreprocessed * (self.labels > 0)
 
     def approximate_somas(
         self,
@@ -1038,7 +1027,7 @@ class TissueImage:
         self.regions = sorted(self.regions, key=lambda region: region['vol'])
         regions = self.regions
 
-        reconstructed_labels = np.zeros(self.imdenoised.shape, dtype=int)
+        reconstructed_labels = np.zeros(self.impreprocessed.shape, dtype=int)
         for itr in range(len(regions)):
             minz, miny, minx, maxz, maxy, maxx = regions[itr]['bbox']
             reconstructed_labels[minz:maxz, miny:maxy, minx:maxx] += regions[itr]['image'] * (itr + 1)
@@ -1214,7 +1203,7 @@ class TissueImage:
                 elif len(np.unique(somas_coords.astype(int), axis=0)) > 1:  # clumpSep
                     somas_coords = somas_coords.astype(int)
                     somas_coords -= ll
-                    im = self.imdenoised[minz:maxz, miny:maxy, minx:maxx].copy()
+                    im = self.impreprocessed[minz:maxz, miny:maxy, minx:maxx].copy()
                     im[~region['image']] = 0
                     markers = np.zeros(region['image'].shape)
 
@@ -1247,7 +1236,7 @@ class TissueImage:
 
             self.regions = filtered_regions
             self.residue = residue
-            watershed_results = np.zeros(self.imdenoised.shape, dtype=int)
+            watershed_results = np.zeros(self.impreprocessed.shape, dtype=int)
             for itr in range(len(filtered_regions)):
                 minz, miny, minx, maxz, maxy, maxx = filtered_regions[itr]['bbox']
                 watershed_results[minz:maxz, miny:maxy, minx:maxx] += filtered_regions[itr]['image'] * (itr + 1)
@@ -1262,7 +1251,7 @@ class TissueImage:
             viewer.layers.remove('watershed_results')
             self.regions = sorted(self.regions, key=lambda region: region['vol'])
             regions = self.regions
-            watershed_results = np.zeros(self.imdenoised.shape, dtype=int)
+            watershed_results = np.zeros(self.impreprocessed.shape, dtype=int)
             for itr in range(len(regions)):
                 minz, miny, minx, maxz, maxy, maxx = regions[itr]['bbox']
                 watershed_results[minz:maxz, miny:maxy, minx:maxx] += regions[itr]['image'] * (itr + 1)
@@ -1278,7 +1267,7 @@ class TissueImage:
             self.ALL_PT_ESTIMATES = ALL_PT_ESTIMATES
             self.FINAL_PT_ESTIMATES = FINAL_PT_ESTIMATES
             self.reconstructed_labels = watershed_results
-            self.imsegmented = self.imdenoised * (watershed_results > 0)
+            self.imsegmented = self.impreprocessed * (watershed_results > 0)
 
             if sync:
                 self.refine_soma_approx(sync=True)
@@ -1286,7 +1275,7 @@ class TissueImage:
         # if sync and gui is False:
         # else:
         viewer = napari.Viewer(ndisplay=3)
-        viewer.add_image(self.imdenoised, scale=SCALE, name='denoised')
+        viewer.add_image(self.impreprocessed, scale=SCALE, name='denoised')
         viewer.add_image(self.imsegmented, scale=SCALE, name='segmented')
         viewer.add_labels(self.reconstructed_labels, rendering='translucent', opacity=.5,
                         scale=SCALE, name='reconstructed_labels')
@@ -1334,7 +1323,7 @@ class TissueImage:
         grid_size : int or None
             Size of the grid view.
         """
-        denoised = self.imdenoised
+        denoised = self.impreprocessed
         regions = self.regions
         segmented = self.imsegmented
 
@@ -1364,7 +1353,7 @@ class TissueImage:
     
     def refine_soma_approx(self, sync=False):
         self.n_region = 0
-        denoised = self.imdenoised
+        denoised = self.impreprocessed
         regions = self.regions
         SCALE = self.SCALE
 
@@ -1458,7 +1447,7 @@ class TissueImage:
                 elif len(np.unique(somas_coords.astype(int), axis=0)) > 1:  # clumpSep
                     somas_coords = somas_coords.astype(int)
                     somas_coords -= ll
-                    im = self.imdenoised[minz:maxz, miny:maxy, minx:maxx].copy()
+                    im = self.impreprocessed[minz:maxz, miny:maxy, minx:maxx].copy()
                     im[~region['image']] = 0
                     markers = np.zeros(region['image'].shape)
 
@@ -1491,7 +1480,7 @@ class TissueImage:
 
             self.regions = sorted(filtered_regions, key=lambda region: region['vol'])
             self.residue = residue
-            watershed_results = np.zeros(self.imdenoised.shape, dtype=int)
+            watershed_results = np.zeros(self.impreprocessed.shape, dtype=int)
             for itr in range(len(filtered_regions)):
                 minz, miny, minx, maxz, maxy, maxx = filtered_regions[itr]['bbox']
                 watershed_results[minz:maxz, miny:maxy, minx:maxx] += filtered_regions[itr]['image'] * (itr + 1)
@@ -1502,7 +1491,7 @@ class TissueImage:
             self.ALL_PT_ESTIMATES = ALL_PT_ESTIMATES
             self.FINAL_PT_ESTIMATES = FINAL_PT_ESTIMATES
             self.reconstructed_labels = watershed_results
-            self.imsegmented = self.imdenoised * (watershed_results > 0)
+            self.imsegmented = self.impreprocessed * (watershed_results > 0)
 
             if sync:
                 self.export_cropped(self.LOW_VOLUME_CUTOFF, self.HIGH_VOLUME_CUTOFF,
@@ -1520,7 +1509,7 @@ class TissueImage:
         low_vol_cutoff = self.LOW_VOLUME_CUTOFF
         hi_vol_cutoff = self.HIGH_VOLUME_CUTOFF
         out_type = self.OUT_DIMS
-        tissue_img = self.imdenoised
+        tissue_img = self.impreprocessed
         regions = self.regions
         residue_regions = None
         seg_type = self.SEGMENT_TYPE
@@ -1541,7 +1530,7 @@ class TissueImage:
         _mkdir_if_not(DIR)
 
         IMAGE_NAME = '.'.join(path.basename(img_path).split('.')[:-1])
-        OUT_DIR = self.out_dir
+        OUT_DIR = self.OUT_DIR
 
         _mkdir_if_not(OUT_DIR)
 
@@ -1568,10 +1557,10 @@ class TissueImage:
                 metadata = file.imagej_metadata
                 cell_metadata['unit'] = metadata['unit']
                 cell_metadata['spacing'] = metadata['spacing']
-        elif img_path.split('.')[-1] == 'czi':
-            with czifile.CziFile(img_path) as file:
-                metadata = file.metadata(False)['ImageDocument']['Metadata']
-                cell_metadata['scaling'] = metadata['Scaling']
+        # elif img_path.split('.')[-1] == 'czi':
+        #     with czifile.CziFile(img_path) as file:
+        #         metadata = file.metadata(False)['ImageDocument']['Metadata']
+        #         cell_metadata['scaling'] = metadata['Scaling']
         cell_metadata['parent_image'] = path.abspath(img_path)
         cell_metadata['scale'] = self.SCALE
 
@@ -1746,11 +1735,11 @@ class TissueImage:
             'OUTPUT_DIMS': self.OUT_DIMS,
         }
 
-        with open(path.join(self.out_dir, '.params.json'), 'w') as out:
+        with open(path.join(self.OUT_DIR, '.params.json'), 'w') as out:
             json.dump(params, out)
 
-        zarr.save(path.join(self.out_dir, '.label_diff.zarr'), self.label_diff)
-        zarr.save(path.join(self.out_dir, '.somas_coords.zarr'), self.FINAL_PT_ESTIMATES)
+        zarr.save(path.join(self.OUT_DIR, '.label_diff.zarr'), self.label_diff)
+        zarr.save(path.join(self.OUT_DIR, '.somas_coords.zarr'), self.FINAL_PT_ESTIMATES)
 
     def export_cropped(
         self,
@@ -1774,7 +1763,7 @@ class TissueImage:
         self.SEGMENT_TYPE = segment_type
         SCALE = self.SCALE
 
-        reconstructed_cells = np.zeros_like(self.imdenoised)
+        reconstructed_cells = np.zeros_like(self.impreprocessed)
 
         minz, miny, minx, maxz, maxy, maxx = self.regions[0]['bbox']
 
@@ -1796,7 +1785,7 @@ class TissueImage:
             for region in self.regions:
                 if self.LOW_VOLUME_CUTOFF <= region['vol'] <= self.HIGH_VOLUME_CUTOFF:
                     minz, miny, minx, maxz, maxy, maxx = region['bbox']
-                    segmented_cell = region['image'] * self.imdenoised[minz:maxz, miny:maxy, minx:maxx]
+                    segmented_cell = region['image'] * self.impreprocessed[minz:maxz, miny:maxy, minx:maxx]
                     segmented_cell = segmented_cell / (segmented_cell.max() - segmented_cell.min())
                     reconstructed_cells[minz:maxz, miny:maxy, minx:maxx] += segmented_cell
             minz, miny, minx, maxz, maxy, maxx = self.regions[self.n_region]['bbox']
@@ -1818,7 +1807,7 @@ class TissueImage:
             self.OUT_DIMS, self.SEGMENT_TYPE = output_option, segment_type
             self.imsegmented = reconstructed_cells
             export_cells(self.im_path, self.LOW_VOLUME_CUTOFF,
-                         self.HIGH_VOLUME_CUTOFF, output_option, self.imdenoised,
+                         self.HIGH_VOLUME_CUTOFF, output_option, self.impreprocessed,
                          self.regions, None, segment_type, self.ROI_NAME, self.roi_polygon)
 
             params = {
@@ -1837,11 +1826,11 @@ class TissueImage:
                 'OUTPUT_DIMS': self.OUT_DIMS,
             }
 
-            with open(self.out_dir + '.params.json', 'w') as out:
+            with open(self.OUT_DIR + '.params.json', 'w') as out:
                 json.dump(params, out)
 
             out = np.array([self.ALL_PT_ESTIMATES, self.FINAL_PT_ESTIMATES])
-            np.save(self.out_dir + '.somas_estimates.npy', out)
+            np.save(self.OUT_DIR + '.somas_estimates.npy', out)
 
         if gui:
             viewer = napari.Viewer(ndisplay=3)

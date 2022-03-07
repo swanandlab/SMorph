@@ -50,8 +50,11 @@ def _import_image(im_path, channel_interest):
         imfile.set_scene(0)
         im = imfile.get_image_data("ZYX", T=0, C=channel_interest)
 
-        # assumes resolution unit is in microns
-        scale = tuple(imfile.physical_pixel_sizes)  # tuple(map(lambda a: a * 1e-6, tuple(imfile.physical_pixel_sizes)))
+        if im_path.split('.')[-1] == 'czi': # assumes resolution unit is in meters
+            scale = tuple(map(lambda a: a * 1e6, tuple(imfile.physical_pixel_sizes)))
+        else:
+            # assumes resolution unit is in microns
+            scale = tuple(imfile.physical_pixel_sizes)
         if isinstance(imfile.metadata, ElementTree.Element):
             metadata = etree_to_dict(imfile.metadata)
         elif isinstance(imfile.metadata, ome.OME):
@@ -92,9 +95,9 @@ def imread(im_path, ref_path=None, channel_interest=0):
 
     im = im if im.ndim == 3 else np.expand_dims(img, 0)
 
-    if ref_path is not None:
+    if not(ref_path in (None, '')):
         ref_im = _import_image(ref_path, channel_interest)[0]
-        im = exposure.match_histograms(im, ref_img)
+        im = exposure.match_histograms(im, ref_im)
 
     return im, scale, metadata
 

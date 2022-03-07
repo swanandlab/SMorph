@@ -36,3 +36,5 @@ from ._postprocessing import (
 from ._max_rect_in_poly import (
     get_maximal_rectangle,
 )
+
+from .gui import Autocrop
