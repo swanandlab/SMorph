@@ -142,6 +142,8 @@ def _analyze_cells(groups):
     silent_remove_file(SKIPPED_CELLS_FILENAME)
     # PROCESSED_DIR = 'Results/processed/'
     # mkdir(PROCESSED_DIR)
+    all_features = []
+    all_sholl = []
 
     for group_no, group in enumerate(dataset):
         group_cell_cnt = 0
@@ -250,6 +252,14 @@ def _analyze_cells(groups):
                         ax.axis("off")
                         fig.savefig(f'{im_name}.png')
                         plt.close(fig)
+                all_features.append(cell.features)
+                radius = cell.sholl_step_size
+                max_radius = (len(cell._non_zero_sholl_intersections))*radius
+                all_sholl.append(dict(
+                    center=cell.skel_soma,
+                    radii=list(range(radius, max_radius+radius, radius)),
+                    nintersections=cell._non_zero_sholl_intersections,
+                ))
             except Exception as err:
                 bad_cells_idx.append(cell_cnt - 1)
                 print('Warning: Skipping analysis of',
@@ -286,6 +296,24 @@ def _analyze_cells(groups):
         out_features.insert(0, 'cell_image_file', file_names)
         out_features.insert(0, 'label', all_labels)
         df_to_csv(out_features, out_dir, FEATURES_FILE_NAME)
+
+        # distributed SMorph
+        for i, file_name in enumerate(file_names):
+            if file_name.split('.')[-1] == 'tif':
+                with tifffile.TiffFile(file_name) as file:
+                    img = file.asarray()
+                    try:
+                        cell_metadata = json.loads(
+                            file.pages[0].tags['ImageDescription'].value)
+                    except json.decoder.JSONDecodeError:
+                        cell_metadata = {}
+                    cell_metadata['smorph'] = dict(
+                        sholl=all_sholl[i],
+                        morphometrics=all_features[i],
+                    )
+                    out_metadata = json.dumps(cell_metadata)
+                    tifffile.imsave(file_name, img,
+                                    description=out_metadata)
 
     return (features, targets, sholl_original_plots, sholl_polynomial_plots,
             group_cnts, file_names)
