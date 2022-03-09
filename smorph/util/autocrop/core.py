@@ -68,8 +68,8 @@ from skimage.restoration import (
 )
 from skimage.segmentation import (
     clear_border,
-    relabel_sequential,
 )
+from skimage.util._map_array import ArrayMap
 from skimage.util import unique_rows
 from vispy.geometry.rect import Rect
 
@@ -351,25 +351,33 @@ def _simplify_graph(skel):
     reduced_nodes : tuple of int
         The index nodes of original graph in simplified graph.
     """
+    if np.sum(skel.degrees > 2) == 0:  # no junctions
+        # don't reduce
+        return skel.graph, np.arange(skel.graph.shape[0])
+
     summary = summarize(skel)
     src = np.asarray(summary['node-id-src'])
     dst = np.asarray(summary['node-id-dst'])
     distance = np.asarray(summary['branch-distance'])
 
     # to reduce the size of simplified graph
-    _, fw, inv = relabel_sequential(np.append(src, dst))
-    src_relab, dst_relab = fw[src], fw[dst]
+    nodes = np.unique(np.append(src, dst))
+    n_nodes = len(nodes)
+    nodes_sequential = np.arange(n_nodes)
 
-    n_nodes = max(np.max(src_relab), np.max(dst_relab))
+    fw_map = ArrayMap(nodes, nodes_sequential)
+    inv_map = ArrayMap(nodes_sequential, nodes)
+
+    src_relab, dst_relab = fw_map[src], fw_map[dst]
 
     edges = sparse.coo_matrix(
-            (distance, (src_relab - 1, dst_relab - 1)),
+            (distance, (src_relab, dst_relab)),
             shape=(n_nodes, n_nodes)
             )
     dir_csgraph = edges.tocsr()
     simp_csgraph = dir_csgraph + dir_csgraph.T  # make undirected
 
-    reduced_nodes = inv[np.arange(1, simp_csgraph.shape[0] + 1)]
+    reduced_nodes = inv_map[np.arange(simp_csgraph.shape[0])]
 
     return simp_csgraph, reduced_nodes
 
@@ -437,25 +445,25 @@ def approximate_somas(im, regions, src=None):
         # mask[tuple(coords.T)] *= True
 
         # filter blobs with forks
-        imskel = skeletonize(gaussian(region['image'], sigma=1))
+        imskel = skeletonize(region['image'])
         skel = Skeleton(imskel)
 
         # soma finding
         original_center_idx = _fast_graph_center_idx(skel)
 
-        neighbors = [original_center_idx]
-        original_center_idx = neighbors.pop(0)
+        # neighbors = [original_center_idx]
+        # original_center_idx = neighbors.pop(0)
 
         itr = 0
         ITR_CUTOFF = 100
-        while (
-            region['image'][tuple(skel.coordinates[original_center_idx].astype(int))] == 0
-            and itr < ITR_CUTOFF
-        ):
-            if len(neighbors) == 0:
-                neighbors = list(skel.nbgraph.neighbors(original_center_idx))
-            original_center_idx = neighbors.pop(0)
-            itr += 1
+        # while (
+        #     region['image'][tuple(skel.coordinates[original_center_idx].astype(int))] == 0
+        #     and itr < ITR_CUTOFF
+        # ):
+        #     if len(neighbors) == 0:
+        #         neighbors = list(skel.nbgraph.neighbors(original_center_idx))
+        #     original_center_idx = neighbors.pop(0)
+        #     itr += 1
 
         if itr < ITR_CUTOFF:
             final_coords = np.asarray([
@@ -1722,9 +1730,6 @@ class TissueImage:
         params = {
             'NAME_ROI': self.ROI_NAME,
             'REF_IM_PATH': pathlib2.Path(self.REF_IM_PATH).as_posix(),
-            'skip_preprocess': self.skip_preprocess,
-            'DECONV_ITR': self.DECONV_ITR,
-            'CLIP_LIMIT': self.CLIP_LIMIT,
             'LOW_THRESH': self.LOW_THRESH,
             'HIGH_THRESH': self.HIGH_THRESH,
             'LOW_AUTO_THRESH': self.LOW_AUTO_THRESH,

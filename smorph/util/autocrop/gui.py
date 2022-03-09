@@ -774,7 +774,7 @@ class Autocrop:
                 self.parent_viewer.layers.remove('filtered')
 
         def _export_results(self, pipe, params_preprocess):
-            with open(path.join(pipe.OUT_DIR, 'params_preprocess.json'), 'w') as out:
+            with open(path.join(pipe.OUT_DIR, '.params_preprocess.json'), 'w') as out:
                 json.dump(params_preprocess, out)
             zarr.save(path.join(pipe.OUT_DIR, '.cache', 'impreprocessed.zarr'), pipe.impreprocessed)
 
@@ -875,7 +875,7 @@ class Autocrop:
         def load_cache(self):
             pipe = self.__magicclass_parent__.pipe
             cache_path = path.join(pipe.OUT_DIR, '.cache', 'impreprocessed.zarr')
-            params_path = path.join(pipe.OUT_DIR, 'params_preprocess.json')
+            params_path = path.join(pipe.OUT_DIR, '.params_preprocess.json')
 
             f = open(params_path)
             params_preprocess = json.loads(f.read())

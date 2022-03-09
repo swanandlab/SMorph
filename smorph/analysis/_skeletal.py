@@ -2,11 +2,10 @@ import numpy as np
 
 from scipy import sparse
 from scipy.ndimage import generate_binary_structure, label
-from skan import skeleton_to_csgraph
 from skan.csr import (
-    branch_statistics,
     make_degree_image,
     Skeleton,
+    skeleton_to_csgraph,
     summarize,
 )
 from skimage.feature import blob_log
@@ -456,8 +455,8 @@ def classify_branching_structure(cell, soma_on_skeleton):
                 soma_branches.append(path)
         return soma_branches
 
-    pixel_graph, coords = cell._skeleton.graph, cell._skeleton.coordinates
-    branch_stats = branch_statistics(pixel_graph)
+    coords = cell._skeleton.graph
+    branch_stats = summarize(cell._skeleton)[['node-id-src', 'node-id-dst', 'branch-distance', 'branch-type']].to_numpy()
     paths_list = skel_obj.paths_list()
 
     terminal_branches = []
