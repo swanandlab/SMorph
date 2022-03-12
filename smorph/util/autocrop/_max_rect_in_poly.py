@@ -1,5 +1,4 @@
 import numpy as np
-import cvxpy
 from shapely.geometry import Polygon
 
 
@@ -61,59 +60,6 @@ def _pts_to_leq(coords):
         A2.append(a2)
         B.append(b)
     return A1, A2, B
-
-
-# def get_maximal_rectangle(coords, point=None):
-#     """Find the largest, inscribed, axis-aligned rectangle.
-#     :param coordinates:
-#         A list of of [x, y] pairs describing a closed, convex polygon.
-#     """
-#     coordinates = _get_intersection(coords)
-#     coordinates = np.array((list(coordinates)))
-
-#     x_range = np.max(coordinates, axis=0)[0]-np.min(coordinates, axis=0)[0]
-#     y_range = np.max(coordinates, axis=0)[1]-np.min(coordinates, axis=0)[1]
-
-#     scale = np.array([x_range, y_range])
-#     sc_coordinates = coordinates/scale
-
-#     poly = Polygon(sc_coordinates)
-
-#     inside_pt = ((poly.representative_point().x,
-#                  poly.representative_point().y) if point is None else sc_coordinates[point])
-
-#     A1, A2, B = _pts_to_leq(sc_coordinates)
-
-#     bl = cvxpy.Variable(2)  # bottom left
-#     tr = cvxpy.Variable(2)  # top right
-#     br = cvxpy.Variable(2)  # bottom right
-#     tl = cvxpy.Variable(2)  # top left
-#     obj = cvxpy.Maximize(cvxpy.log(tr[0] - bl[0]) + cvxpy.log(bl[1] - tr[1]))  # (tr[0] - bl[0]) * (bl[1] - tr[1]))
-#     constraints = [bl[0] == tl[0], br[0] == tr[0],
-#                    tl[1] == tr[1], bl[1] == br[1]]
-
-#     for i in range(len(B)):
-#         if inside_pt[0] * A1[i] + inside_pt[1] * A2[i] <= B[i]:
-#             constraints.append(bl[0] * A1[i] + bl[1] * A2[i] <= B[i])
-#             constraints.append(tr[0] * A1[i] + tr[1] * A2[i] <= B[i])
-#             constraints.append(br[0] * A1[i] + br[1] * A2[i] <= B[i])
-#             constraints.append(tl[0] * A1[i] + tl[1] * A2[i] <= B[i])
-#         else:
-#             constraints.append(bl[0] * A1[i] + bl[1] * A2[i] >= B[i])
-#             constraints.append(tr[0] * A1[i] + tr[1] * A2[i] >= B[i])
-#             constraints.append(br[0] * A1[i] + br[1] * A2[i] >= B[i])
-#             constraints.append(tl[0] * A1[i] + tl[1] * A2[i] >= B[i])
-
-#     prob = cvxpy.Problem(obj, constraints)
-#     # ECOS, CVXOPT, SCS, SCIPY
-#     prob.solve()
-
-#     # print(bl.value, tr.value, br.value, tl.value)
-#     bottom_left = np.array(bl.value).T * scale
-#     top_right = np.array(tr.value).T * scale
-#     # print(bottom_left, top_right)
-
-#     return bottom_left, top_right
 
 
 def get_maximal_rectangle(mask):
