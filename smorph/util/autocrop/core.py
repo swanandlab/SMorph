@@ -903,6 +903,7 @@ class TissueImage:
 
         reg_itr = 1
 
+        # build volume sorted region labels
         for region in regions:
             minz, miny, minx, maxz, maxy, maxx = region['bbox']
             filtered_labels[minz:maxz, miny:maxy, minx:maxx] += region['image'] * reg_itr

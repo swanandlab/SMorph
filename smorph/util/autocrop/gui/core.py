@@ -39,29 +39,35 @@ from skimage import filters
 from skimage.measure import label
 from vispy.geometry.rect import Rect
 
-from . import (
+from .. import (
     core,
     _preprocess as preprocess,
 )
-from ._max_rect_in_poly import (
+from .._max_rect_in_poly import (
     get_maximal_rectangle,
 )
-from ._postprocessing import _segment_clump
-from .._image import THRESHOLD_METHODS
-from .._io import (
+from .._postprocessing import _segment_clump
+from ..._image import THRESHOLD_METHODS
+from ..._io import (
     df_to_csv,
     savefig,
 )
-from ...core.api import Groups
-from ._roi_extract import (
+from ....core.api import Groups
+from .._roi_extract import (
     select_ROI,
     mask_ROI
 )
-from .util import (
+from ..util import (
     only_name,
     _unwrap_polygon,
 )
 
+
+def _get_ncolors_map(ncolors, cmap_name='plasma_r'):
+    cmap = {0: [0,0,0,0], None: [0,0,0,1]}  # initial colors in napari
+    colors = plt.cm.get_cmap(cmap_name, ncolors).colors
+    cmap.update(dict(zip(range(1, ncolors), colors)))
+    return cmap
 
 def longest_contiguous_nonzero(vals):
     """Return longest contiguous nonzero values in 1D array.
@@ -185,6 +191,7 @@ class RefineSegmentation:
                 )
             selector = np.zeros_like(pipe.impreprocessed)
             selector_layer = self.parent_viewer.add_image(selector, blending='additive', scale=pipe.SCALE)
+            self.parent_viewer.layers['labels'].color_mode = 'auto'
 
             # callback function, called on mouse click when volume layer is active
             @selector_layer.mouse_drag_callbacks.append
@@ -947,7 +954,8 @@ class Autocrop:
                 self.parent_viewer.add_image(pipe.impreprocessed, scale=pipe.SCALE, colormap='inferno', name='unsegmented')
                 self.parent_viewer.add_image(pipe.imsegmented, scale=pipe.SCALE, colormap='inferno', name='segmented')
                 self.parent_viewer.add_labels(pipe.labels, scale=pipe.SCALE, name='labels',
-                    rendering='translucent'
+                    rendering='translucent',
+                    color=_get_ncolors_map(len(pipe.regions)+1, cmap_name='plasma_r')
                     )
 
                 parent = self.__magicclass_parent__
