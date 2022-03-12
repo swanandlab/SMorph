@@ -375,12 +375,15 @@ class InteractiveSegmentation:
                 if 'segmented' in layer_names:
                     self.parent_viewer.layers['segmented'].data = pipe.imsegmented.copy()
 
+    
     def confirm_all(self):
         parent = self.__magicclass_parent__
         grandparent = parent.__magicclass_parent__
         greatgrandparent = grandparent.__magicclass_parent__
         pipe = grandparent.__magicclass_parent__.pipe
-        refined = self.parent_viewer.layers["labels"].data
+        viewer = self.parent_viewer
+
+        refined = viewer.layers["labels"].data
         bin_refined = refined > 0
         pipe.labels = refined
         pipe.imsegmented = pipe.impreprocessed * bin_refined
@@ -388,13 +391,13 @@ class InteractiveSegmentation:
         # After all changes (for reproducibility)
         label_diff = (pipe.imbinary).astype(np.int) - bin_refined.astype(np.int)
         pipe.label_diff = label_diff
-        final_soma = np.unique(self.parent_viewer.layers['somas_coords'].data, axis=0)
+        final_soma = np.unique(viewer.layers['somas_coords'].data, axis=0)
         pipe.FINAL_PT_ESTIMATES = final_soma
 
         # Update changes for viewer
         parent.RegionSelector.selected_region.range = (0, len(pipe.regions)-1)
 
-        self.parent_viewer.layers['segmented'].data = pipe.imsegmented.copy()
+        viewer.layers['segmented'].data = pipe.imsegmented.copy()
 
         # Pass the torch
         greatgrandparent.ExportCells.visible = True
@@ -404,40 +407,45 @@ class InteractiveSegmentation:
 
         try:
             greatgrandparent.ExportCells.bandpass_vol
+            viewer.window.remove_dock_widget(
+                viewer.window._dock_widgets["Bandpass Volume"])
         except AttributeError:
-            bandpass_vol = superqt.QLabeledRangeSlider()
-            bandpass_vol.setRange(0, pipe.regions[-1]['vol'])
-            bandpass_vol.setOrientation(1)
-            bandpass_vol.setValue([pipe.LOW_VOLUME_CUTOFF, pipe.HIGH_VOLUME_CUTOFF])
-            bandpass_vol.setEdgeLabelMode(superqt.sliders._labeled.EdgeLabelMode.NoLabel)
-            bandpass_vol.setContentsMargins(25, 5, 25, 5)
-            for i in (0, 1):
-                # vol_cutoff_slider.children()[i].setAlignment(PyQt5.QtCore.Qt.AlignCenter)
-                bandpass_vol.children()[i].setFixedWidth(len(str(int(pipe.regions[-1]['vol']))) * 20)
+            pass
 
-            def vol_cutoff_update():
-                pipe.imsegmented.fill(0)
-                pipe.LOW_VOLUME_CUTOFF, pipe.HIGH_VOLUME_CUTOFF = bandpass_vol.value()
-                for region in pipe.regions:
-                    if pipe.LOW_VOLUME_CUTOFF <= region['vol'] <= pipe.HIGH_VOLUME_CUTOFF:
-                        minz, miny, minx, maxz, maxy, maxx = region['bbox']
-                        segmented_cell = region['image'] * pipe.impreprocessed[minz:maxz, miny:maxy, minx:maxx]
-                        segmented_cell = segmented_cell / (segmented_cell.max() - segmented_cell.min())
-                        pipe.imsegmented[minz:maxz, miny:maxy, minx:maxx] += segmented_cell
-                minz, miny, minx, maxz, maxy, maxx = pipe.regions[pipe.n_region]['bbox']
-                self.parent_viewer.layers['bandpassed'].data = pipe.imsegmented
+        bandpass_vol = superqt.QLabeledRangeSlider()
+        bandpass_vol.setRange(0, pipe.regions[-1]['vol'])
+        bandpass_vol.setOrientation(1)
+        bandpass_vol.setValue([pipe.LOW_VOLUME_CUTOFF, pipe.HIGH_VOLUME_CUTOFF])
+        bandpass_vol.setEdgeLabelMode(superqt.sliders._labeled.EdgeLabelMode.NoLabel)
+        bandpass_vol.setContentsMargins(25, 5, 25, 5)
+        for i in (0, 1):
+            # vol_cutoff_slider.children()[i].setAlignment(PyQt5.QtCore.Qt.AlignCenter)
+            bandpass_vol.children()[i].setFixedWidth(len(str(int(pipe.regions[-1]['vol']))) * 20)
 
-            bandpass_vol.valueChanged.connect(vol_cutoff_update)
-            greatgrandparent.ExportCells.bandpass_vol = bandpass_vol
-        self.parent_viewer.add_image(pipe.imsegmented, colormap='inferno', scale=pipe.SCALE, name='bandpassed')
-        if "Bandpass Volume" not in list(self.parent_viewer.window._dock_widgets.keys()):
-            self.parent_viewer.window.add_dock_widget(
+        def vol_cutoff_update():
+            pipe.imsegmented.fill(0)
+            pipe.LOW_VOLUME_CUTOFF, pipe.HIGH_VOLUME_CUTOFF = bandpass_vol.value()
+            for region in pipe.regions:
+                if pipe.LOW_VOLUME_CUTOFF <= region['vol'] <= pipe.HIGH_VOLUME_CUTOFF:
+                    minz, miny, minx, maxz, maxy, maxx = region['bbox']
+                    segmented_cell = region['image'] * pipe.impreprocessed[minz:maxz, miny:maxy, minx:maxx]
+                    segmented_cell = segmented_cell / (segmented_cell.max() - segmented_cell.min())
+                    pipe.imsegmented[minz:maxz, miny:maxy, minx:maxx] += segmented_cell
+            minz, miny, minx, maxz, maxy, maxx = pipe.regions[pipe.n_region]['bbox']
+            viewer.layers['bandpassed'].data = pipe.imsegmented
+
+        bandpass_vol.valueChanged.connect(vol_cutoff_update)
+        greatgrandparent.ExportCells.bandpass_vol = bandpass_vol
+        viewer.add_image(pipe.imsegmented, colormap='inferno', scale=pipe.SCALE, name='bandpassed')
+        if "Bandpass Volume" not in list(viewer.window._dock_widgets.keys()):
+            viewer.window.add_dock_widget(
                 greatgrandparent.ExportCells.bandpass_vol,
                 name="Bandpass Volume", area="bottom"
                 )
-            self.parent_viewer.window._dock_widgets["Bandpass Volume"].setFixedHeight(80)
+            viewer.window._dock_widgets["Bandpass Volume"].setFixedHeight(80)
         greatgrandparent.current_index = 4
         vol_cutoff_update()
+
 
 
 def _auto_params_deconv(pipe):

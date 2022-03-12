@@ -1735,8 +1735,8 @@ class TissueImage:
             'HIGH_THRESH': self.HIGH_THRESH,
             'LOW_AUTO_THRESH': self.LOW_AUTO_THRESH,
             'HIGH_AUTO_THRESH': self.HIGH_AUTO_THRESH,
-            'LOW_VOLUME_CUTOFF': self.LOW_VOLUME_CUTOFF,  # filter noise/artifacts
-            'HIGH_VOLUME_CUTOFF': self.HIGH_VOLUME_CUTOFF,  # filter cell clusters
+            'LOW_VOLUME_CUTOFF': int(self.LOW_VOLUME_CUTOFF),  # filter noise/artifacts
+            'HIGH_VOLUME_CUTOFF': int(self.HIGH_VOLUME_CUTOFF),  # filter cell clusters
             'SEGMENT_TYPE': self.SEGMENT_TYPE,
             'OUTPUT_DIMS': self.OUT_DIMS,
         }
