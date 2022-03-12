@@ -12,7 +12,6 @@ import roifile
 import skimage.io as io
 import tifffile
 from aicsimageio import AICSImage
-from imaris_ims_file_reader.ims import ims
 from ome_types.model import ome
 from skimage import img_as_float, img_as_ubyte, exposure
 
