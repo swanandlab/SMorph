@@ -144,7 +144,13 @@ def _analyze_cells(groups):
     # mkdir(PROCESSED_DIR)
     all_features = []
     all_sholl = []
-
+    def myconverter(obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
     for group_no, group in enumerate(dataset):
         group_cell_cnt = 0
         for cell_image in group:
@@ -153,10 +159,11 @@ def _analyze_cells(groups):
 
             cell_cnt += 1
             try:
-                # metadata = tifffile.TiffFile(file_names[cell_cnt-1]).pages[
-                #                 0].tags['ImageDescription'].value
-                # metadata = json.loads(metadata)
-                mscale = scale # metadata['scale'][-cell_image.ndim:]
+                metadata = tifffile.TiffFile(file_names[cell_cnt-1]).pages[
+                                0].tags['ImageDescription'].value
+                metadata = json.loads(metadata)
+                mscale = metadata['scale'][-cell_image.ndim:]
+                # mscale = scale
                 cell = Cell(cell_image, img_type, mscale,
                             segmented=segmented,
                             contrast_ptiles=contrast_ptiles,
@@ -239,7 +246,7 @@ def _analyze_cells(groups):
                         # draw.overlay_skeleton_networkx(
                         #     cell._skeleton.graph, cell._skeleton.coordinates, axis=ax)
                         ax.plot(cell.skel_soma[1],
-                                 cell.skel_soma[0], 'b.', alpha=.5)
+                                    cell.skel_soma[0], 'b.', alpha=.5)
 
                         radius = cell.sholl_step_size/mscale[-1]
                         intersections = cell._sholl_intersections
@@ -252,13 +259,14 @@ def _analyze_cells(groups):
                         ax.axis("off")
                         fig.savefig(f'{im_name}.png')
                         plt.close(fig)
+
                 all_features.append(cell.features)
                 radius = cell.sholl_step_size
-                max_radius = (len(cell._non_zero_sholl_intersections))*radius
+                max_radius = len(cell._non_zero_sholl_intersections)*radius
                 all_sholl.append(dict(
-                    center=cell.skel_soma,
-                    radii=list(range(radius, max_radius+radius, radius)),
-                    nintersections=cell._non_zero_sholl_intersections,
+                    center=list(map(int, cell.skel_soma)),
+                    radii=list(np.arange(radius, max_radius+radius, radius)),
+                    nintersections=list(map(int, cell._non_zero_sholl_intersections)),
                 ))
             except Exception as err:
                 bad_cells_idx.append(cell_cnt - 1)
@@ -277,6 +285,7 @@ def _analyze_cells(groups):
 
         if save_results:
             out_features = features.copy()
+            print(len(tmp_fnames))
             out_features.insert(0, 'cell_image_file', tmp_fnames)
             out_features.insert(0, 'label', all_labels)
             df_to_csv(out_features, out_dir, FEATURES_FILE_NAME)
@@ -292,6 +301,7 @@ def _analyze_cells(groups):
                          'your input data.')
 
     if save_results:
+        # print(all_features); print(all_sholl)
         out_features = features.copy()
         out_features.insert(0, 'cell_image_file', file_names)
         out_features.insert(0, 'label', all_labels)
@@ -311,7 +321,7 @@ def _analyze_cells(groups):
                         sholl=all_sholl[i],
                         morphometrics=all_features[i],
                     )
-                    out_metadata = json.dumps(cell_metadata)
+                    out_metadata = json.dumps(cell_metadata, default=myconverter)
                     tifffile.imsave(file_name, img,
                                     description=out_metadata)
 

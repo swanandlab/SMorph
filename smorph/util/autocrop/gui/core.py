@@ -19,6 +19,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 import superqt
+import tifffile
 import zarr
 
 COLOR = 'white'
@@ -35,13 +36,24 @@ from magicgui.widgets import ComboBox, FloatSlider, Label, Slider
 from magicclass import magicclass, field, set_design, wrappers
 from magicclass.widgets import Figure, TupleEdit
 from matplotlib import gridspec
+from PyQt5.QtWidgets import QTreeView
 from skimage import filters
 from skimage.measure import label
 from vispy.geometry.rect import Rect
 
+from .tree_widget import (
+    TreeModel
+)
+from .viewer import (
+    _get_roi_scaled_points,
+    _read_images,
+)
 from .. import (
     core,
     _preprocess as preprocess,
+)
+from .._io import (
+    imread,
 )
 from .._max_rect_in_poly import (
     get_maximal_rectangle,
@@ -1049,19 +1061,26 @@ class Autocrop:
             pipe._export()
 
     @magicclass(widget_type="scrollable")
-    class SMorph:
-        group_dir = field(str)
-        LABELS = field(str)
+    class Analyze:
+        group_dir = field('Autocropped/CONTROL_MSP2.1MB_4_LONG MARK_20X_SEC 1_LEFT HILUS_28 DAY-HILUS/segmented_3d')
+        LABELS = field('sal')
+        IMG_TYPE = field(str, widget_type="ComboBox", options=dict(choices=['confocal', 'DAB']))
+        SEGMENTED = field(True)
+        SHOLL_STEP_SIZE = field(3)
+        POLYNOMIAL_DEGREE = field(3)
         fig = Figure()
+        current_tissue = None
+        current_scale = (1,1,1)
 
         def analyze(self):
             pipe = self.__magicclass_parent__.pipe
-            IMG_TYPE = 'confocal'
-            SEGMENTED = True
+            IMG_TYPE = self.IMG_TYPE.value
+            SEGMENTED = self.IMG_TYPE.value
             CONTRAST_PTILES = (0, 100)
             THRESHOLD_METHOD = .0
-            SHOLL_STEP_SIZE = 3
-            POLYNOMIAL_DEGREE = 3
+            SHOLL_STEP_SIZE = self.SHOLL_STEP_SIZE.value
+            POLYNOMIAL_DEGREE = self.POLYNOMIAL_DEGREE.value
+
             group_dir = self.group_dir.value
             group_dir = pipe.OUT_DIR if group_dir == '' else group_dir
 
@@ -1136,6 +1155,79 @@ class Autocrop:
             write_buffer = DataFrame(file_names, columns=['file_name'])
             df_polynomial_plots = DataFrame(polynomial_plots, columns=cols)
             write_buffer[df_polynomial_plots.columns] = df_polynomial_plots
+
+            tree, dataset = _read_images(file_names)
+            headers = ["Images"]
+
+            def gen_dict_extract(key, var):
+                # https://stackoverflow.com/questions/9807634/find-all-occurrences-of-a-key-in-nested-dictionaries-and-lists
+                if hasattr(var,'items'):
+                    for k, v in var.items():
+                        if k == key:
+                            yield v
+                        if isinstance(v, dict):
+                            for result in gen_dict_extract(key, v):
+                                yield result
+                        elif isinstance(v, list):
+                            for d in v:
+                                for result in gen_dict_extract(key, d):
+                                    yield result
+
+            tree_view = QTreeView()  # Instantiate the View
+            # Set the models
+            model = TreeModel(headers, tree)
+            tree_view.setModel(model)
+            tree_view.expandAll()
+            tree_view.resizeColumnToContents(0)
+            hl = self.fig.ax.plot([], [], label='current')[0]
+
+            # set up callbacks whenever the selection changes
+            selection = tree_view.selectionModel()
+            @selection.currentChanged.connect
+            def _on_change(current, previous):
+                key = model.data(current)
+
+                if key in dataset.keys():  # is an tissue image path
+                    if key != self.current_tissue:
+                        self.parent_viewer.layers.clear()
+                        tissue, scale, metadata = imread(key, channel_interest=0)
+                        self.parent_viewer.add_image(tissue, scale=scale)
+                        self.current_tissue = key
+                        self.current_scale = scale
+
+                if key.endswith('.tif'):
+                    if key in list(dataset[self.current_tissue].values())[0].keys():
+                        queries = list(gen_dict_extract(key, dataset))
+                        bounds, centroid_pts, _ = _get_roi_scaled_points(queries.copy())
+
+                        im, _, _ = imread(key)
+                        minz, miny, minx, maxz, maxy, maxx = bounds[0]
+
+                        labels = np.zeros_like(self.parent_viewer.layers[0].data, dtype=int)
+                        print(im.shape, bounds[0])
+                        labels[minz:maxz, miny:maxy, minx:maxx] = (im > 0).astype(int)
+                        print(key)
+                        layer_names = [layer.name for layer in self.parent_viewer.layers]
+                        if 'labels' in layer_names:
+                            self.parent_viewer.layers['labels'].data = labels
+                        else:
+                            self.parent_viewer.add_labels(
+                                    labels, rendering='translucent', opacity=.5,
+                                    scale=self.current_scale
+                                    )
+
+                        for i, c in enumerate(centroid_pts):
+                            scaled_c = np.array(c) * np.array(queries[i]['scale'])
+                            self.parent_viewer.camera.center = scaled_c
+                            sholl = queries[i]['smorph']['sholl']
+                            hl.set_xdata(sholl['radii'])
+                            hl.set_ydata(sholl['nintersections'])
+                            self.fig.ax.relim()
+                            self.fig.ax.autoscale()
+                            self.fig.ax.legend()
+                            self.fig.draw()
+
+            self.parent_viewer.window.add_dock_widget(tree_view)
 
             if groups.save:
                 # single_cell_intersections

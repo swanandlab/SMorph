@@ -8,55 +8,47 @@ import tifffile
 import smorph.util.autocrop as ac
 
 
-try:
-    on_colab = 'google.colab' in str(get_ipython())
-except NameError:
-    on_colab = False
-
-
-def _read_images(files, prefix=''):
+def _read_images(file_names, prefix=''):
     dataset = {}
-    for file in files:
-        if not file.startswith('.'):  # skip hidden files
-            name = prefix + file
-            metadata = tifffile.TiffFile(name).pages[
-                            0].tags['ImageDescription'].value
-            metadata = json.loads(metadata)
-            # if 'cluster_label' not in metadata.keys():
-                # continue
-            metadata['name'] = name
+    """
+    {
+        parent: {
+            roi: {
+                feats
+            }
+        }
+    }
+    """
+    tree = {}
+    for i, fname in enumerate(file_names):
+        if fname.split('.')[-1] == 'tif':
+            with tifffile.TiffFile(fname) as f:
+                metadata = f.pages[0].tags['ImageDescription'].value
+                metadata = json.loads(metadata)
 
-            if metadata['parent_image'] in dataset:
-                if all(x in metadata.keys() for x in ('roi_name', 'roi')):
-                    if type(dataset[metadata['parent_image']][0]) == list:
-                        stored = False
-                        for i in range(
-                            len(dataset[metadata['parent_image']])
-                        ):
-                            if (
-                                dataset[metadata['parent_image']][i][0][
-                                    'roi_name'] == metadata['roi_name']
-                            ):
-                                dataset[metadata['parent_image']][
-                                    i].append(metadata)
-                                stored = True
+                if metadata['parent_image'] in dataset:
+                    if all(x in metadata.keys() for x in ('roi_name', 'roi')):
+                        if not isinstance(dataset[metadata['parent_image']], dict):
+                            dataset[metadata['parent_image']] = {}
+                            tree[metadata['parent_image']] = {}
+                        if metadata['roi_name'] not in dataset[metadata['parent_image']].keys():
+                            dataset[metadata['parent_image']][metadata['roi_name']] = {}
+                            tree[metadata['parent_image']][metadata['roi_name']] = {}
 
-                        if not stored:
-                            dataset[metadata['parent_image']].append(
-                                [metadata])
-                    elif (
-                        dataset[metadata['parent_image']][0][
-                            'roi_name'] == metadata['roi_name']
-                    ):
-                        dataset[metadata['parent_image']].append(metadata)
-                    else:
-                        dataset[metadata['parent_image']] = [
-                            dataset[metadata['parent_image']], [metadata]]
+                        dataset[metadata['parent_image']][metadata['roi_name']][fname] = metadata
+                        tree[metadata['parent_image']][metadata['roi_name']][fname] = {}
                 else:
-                    dataset[metadata['parent_image']].append(metadata)
-            else:
-                dataset[metadata['parent_image']] = [metadata]
-    return dataset
+                    dataset[metadata['parent_image']] = {
+                        metadata['roi_name']: {
+                            fname: metadata
+                        }
+                    }
+                    tree[metadata['parent_image']] = {
+                        metadata['roi_name']: {
+                            fname: {}
+                        }
+                    }
+    return tree, dataset
 
 
 def _read_groups_folders(groups_folders):
@@ -84,20 +76,22 @@ def _read_groups_folders(groups_folders):
 
 
 def _get_roi_scaled_points(data):
-    bounds, centroid_pts, cluster_labels = [], [], []
+    bounds_pts, centroid_pts, cluster_labels = [], [], []
     for cell_data in data:
+        centroid = cell_data['centroid'].copy()
+        bounds = cell_data['bounds'].copy()
         if 'roi' in cell_data.keys():
-            cell_data['centroid'][1] += cell_data['roi'][0]
-            cell_data['centroid'][2] += cell_data['roi'][1]
-            cell_data['bounds'][1] += cell_data['roi'][0]
-            cell_data['bounds'][2] += cell_data['roi'][1]
-            cell_data['bounds'][4] += cell_data['roi'][0]
-            cell_data['bounds'][5] += cell_data['roi'][1]
-        centroid_pts.append(cell_data['centroid'])
-        bounds.append(cell_data['bounds'])
+            centroid[1] += cell_data['roi'][0]
+            centroid[2] += cell_data['roi'][1]
+            bounds[1] += cell_data['roi'][0]
+            bounds[2] += cell_data['roi'][1]
+            bounds[4] += cell_data['roi'][0]
+            bounds[5] += cell_data['roi'][1]
+        centroid_pts.append(centroid)
+        bounds_pts.append(bounds)
         if 'cluster_label' in cell_data.keys():
             cluster_labels.append(cell_data['cluster_label'])
-    return bounds, centroid_pts, cluster_labels
+    return bounds_pts, centroid_pts, cluster_labels
 
 
 def _model_image_with_labels(viewer, img, name, data):
@@ -113,9 +107,6 @@ def _model_image_with_labels(viewer, img, name, data):
 
 def label_clusters_spatially(groups_folders):
     dataset = _read_groups_folders(groups_folders)
-
-    if on_colab:
-        return
 
     with napari.gui_qt():
         viewer = napari.Viewer(ndisplay=3)
@@ -268,9 +259,6 @@ def _label_cells_in_tissue(
 
 
 def identify_cells_in_tissue(img_paths):
-    if on_colab:
-        return
-
     if type(img_paths) is str:
         return _identify_cell_in_tissue(img_paths)
     if len(img_paths) == 1:
