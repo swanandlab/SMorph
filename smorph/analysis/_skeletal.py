@@ -359,7 +359,10 @@ def get_no_of_forks(cell):
     # else:
     #     cell._fork_coords = zip(fork_indices[0], fork_indices[1],
     #                             fork_indices[2])
-    num_forks = np.sum(cell._skeleton.degrees > 2)
+    skel = cell._skeleton
+    mask = skel.degrees > 2
+    num_forks = np.sum(mask)
+    cell._fork_coords = skel.coordinates[mask]
 
     return num_forks
 
