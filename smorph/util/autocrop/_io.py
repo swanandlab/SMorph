@@ -49,11 +49,11 @@ def _import_image(im_path, channel_interest):
         imfile.set_scene(0)
         im = imfile.get_image_data("ZYX", T=0, C=channel_interest)
 
-        if im_path.split('.')[-1] == 'czi': # assumes resolution unit is in meters
-            scale = tuple(map(lambda a: a * 1e6, tuple(imfile.physical_pixel_sizes)))
-        else:
-            # assumes resolution unit is in microns
-            scale = tuple(imfile.physical_pixel_sizes)
+        # if im_path.split('.')[-1] == 'czi': # assumes resolution unit is in meters
+        #     scale = tuple(map(lambda a: a * 1e6, tuple(imfile.physical_pixel_sizes)))
+        # else:
+        # assumes resolution unit is in microns
+        scale = tuple(imfile.physical_pixel_sizes)
         if isinstance(imfile.metadata, ElementTree.Element):
             metadata = etree_to_dict(imfile.metadata)
         elif isinstance(imfile.metadata, ome.OME):
@@ -62,7 +62,7 @@ def _import_image(im_path, channel_interest):
             metadata = imfile.metadata
     else:
         im = np.squeeze(io.imread(im_path))
-        if img.ndim > 3:
+        if im.ndim > 3:
             im = im[:, :, :, channel_interest]
         scale = (1,1,1)
         metadata = {}
