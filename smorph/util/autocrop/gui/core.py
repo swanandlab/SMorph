@@ -1056,12 +1056,10 @@ class Autocrop:
         SEGMENTED = field(True)
         SHOLL_STEP_SIZE = field(3)
         POLYNOMIAL_DEGREE = field(3)
-        fig = Figure()
-        current_tissue = None
-        current_scale = (1,1,1)
 
         def analyze(self):
-            pipe = self.__magicclass_parent__.pipe
+            parent = self.__magicclass_parent__
+            pipe = parent.pipe
             IMG_TYPE = self.IMG_TYPE.value
             SEGMENTED = self.IMG_TYPE.value
             CONTRAST_PTILES = (0, 100)
@@ -1122,8 +1120,8 @@ class Autocrop:
             jasp_friendly = DataFrame(jasp_friendly, columns=jasp_friendly_cols)
 
             try:
-                self.ImageTree
-                self.fig.ax.clear()
+                parent.Visualize.ImageTree
+                parent.Visualize.fig.ax.clear()
             except AttributeError:
                 pass
 
@@ -1132,12 +1130,12 @@ class Autocrop:
 
                 sns.lineplot(jasp_friendly[jasp_friendly["label"] == labels[group_no]]["radius"],
                     jasp_friendly[jasp_friendly["label"] == labels[group_no]]["nintersections"],
-                    ci=68, label=labels[group_no], ax=self.fig.ax
+                    ci=68, label=labels[group_no], ax=parent.Visualize.fig.ax
                     )
 
-            self.fig.xlabel("Distance from soma")
-            self.fig.ylabel("No. of intersections")
-            self.fig.legend()
+            parent.Visualize.fig.xlabel("Distance from soma")
+            parent.Visualize.fig.ylabel("No. of intersections")
+            parent.Visualize.fig.legend()
             fig = plt.gcf()
 
             cols = np.arange(sholl_step_sz,
@@ -1149,15 +1147,15 @@ class Autocrop:
             write_buffer[df_polynomial_plots.columns] = df_polynomial_plots
 
             try:
-                self.ImageTree
-                self.remove('ImageTree')
+                parent.Visualize.ImageTree
+                parent.Visualize.remove('ImageTree')
             except AttributeError:
                 pass
 
-            tree_view = ImageTree(self, file_names)
+            tree_view = ImageTree(parent.Visualize, file_names)
             tree_view.name = 'ImageTree'
 
-            self.append(tree_view)
+            parent.Visualize.append(tree_view)
 
             if groups.save:
                 # single_cell_intersections
@@ -1167,3 +1165,43 @@ class Autocrop:
 
                 OUTPLOT = f'avg_sholl_plot.{groups.fig_format}'
                 savefig(fig, path.join(groups.out_dir, OUTPLOT))
+
+            parent.current_index = 6
+
+    @magicclass(widget_type="scrollable")
+    class Visualize:
+        fig = Figure()
+        current_tissue = None
+        current_scale = (1, 1, 1)
+
+        @magicclass(layout="horizontal", widget_type="none")
+        class ModifyVis:
+            seg_labels = field(True)
+            soma = field(False)
+            centroid = field(False)
+            skel = field(False)
+
+            @seg_labels.connect
+            @soma.connect
+            @centroid.connect
+            @skel.connect
+            def _remove_unchecked_layer(self):
+                if not self.seg_labels.value:
+                    layer_names = [layer.name for layer in self.parent_viewer.layers]
+                    if 'labels' in layer_names:
+                        self.parent_viewer.layers.remove('labels')
+
+                if not self.soma.value:
+                    layer_names = [layer.name for layer in self.parent_viewer.layers]
+                    if 'soma' in layer_names:
+                        self.parent_viewer.layers.remove('soma')
+
+                if not self.centroid.value:
+                    layer_names = [layer.name for layer in self.parent_viewer.layers]
+                    if 'centroid' in layer_names:
+                        self.parent_viewer.layers.remove('centroid')
+
+                if not self.skel.value:
+                    layer_names = [layer.name for layer in self.parent_viewer.layers]
+                    if 'skeleton' in layer_names:
+                        self.parent_viewer.layers.remove('skeleton')

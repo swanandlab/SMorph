@@ -4,12 +4,14 @@ from magicclass.widgets import FreeWidget
 from pandas import DataFrame
 from PyQt5.QtCore import Qt, QAbstractItemModel, QModelIndex
 from PyQt5.QtWidgets import QTreeView
+from skimage.morphology import skeletonize
 
 from .viewer import (
     _get_roi_scaled_points,
     _read_images,
 )
 from .._io import imread
+
 
 def gen_dict_extract(key, var):
     # https://stackoverflow.com/questions/9807634/find-all-occurrences-of-a-key-in-nested-dictionaries-and-lists
@@ -31,6 +33,46 @@ def reconstruct_labels(bounds, images, out):
         minz, miny, minx, maxz, maxy, maxx = bounds[itr]
         out[minz:maxz, miny:maxy, minx:maxx] += images[itr] * (itr + 1)
     return out
+
+
+def populate_visualizations(parent, layer_names, labels, centroids, soma, skel):
+    if parent.ModifyVis.seg_labels.value:
+        if 'labels' in layer_names:
+            parent.parent_viewer.layers['labels'].data = labels
+        else:
+            parent.parent_viewer.add_labels(
+                    labels, rendering='translucent', opacity=.5,
+                    scale=parent.current_scale
+                    )
+
+    if parent.ModifyVis.centroid.value:
+        if 'centroid' in layer_names:
+            parent.parent_viewer.layers['centroid'].data = centroids
+        else:
+            parent.parent_viewer.add_points(
+                    centroids, blending='translucent', opacity=.6,
+                    face_color='yellow', edge_width=0, size=5,
+                    scale=parent.current_scale, name='centroid'
+                    )
+
+    if parent.ModifyVis.soma.value:
+        if 'soma' in layer_names:
+            parent.parent_viewer.layers['soma'].data = soma
+        else:
+            parent.parent_viewer.add_points(
+                    soma, blending='translucent', opacity=.6,
+                    face_color='red', edge_width=0, size=5,
+                    scale=parent.current_scale, name='soma'
+                    )
+
+    if parent.ModifyVis.skel.value:
+        if 'skeleton' in layer_names:
+            parent.parent_viewer.layers['skeleton'].data = skel
+        else:
+            parent.parent_viewer.add_image(
+                    skel, blending='additive', opacity=.4, colormap='red',
+                    scale=parent.current_scale, name='skeleton'
+                    )
 
 
 class ImageTree(FreeWidget):
@@ -58,6 +100,7 @@ def make_tree_widget(parent, file_names=[]):
     @selection.currentChanged.connect
     def _on_change(current, previous):
         key = model.data(current)
+        layer_names = [layer.name for layer in parent.parent_viewer.layers]
 
         if key in dataset.keys():  # is an tissue image path
             if key != parent.current_tissue:
@@ -68,9 +111,8 @@ def make_tree_widget(parent, file_names=[]):
                 parent.current_scale = scale
 
             child_cells = list(dataset[parent.current_tissue].values())[0].keys()
-            all_ims = []
-            all_bounds = []
-            all_sholl = []
+            all_ims, all_bounds, all_sholl, all_centroids = [], [], [], []
+            all_soma = []
 
             for cell in child_cells:
                 queries = list(gen_dict_extract(cell, dataset))
@@ -80,6 +122,10 @@ def make_tree_widget(parent, file_names=[]):
                 all_ims.append(im > 0)
                 sholl = queries[0]['smorph']['sholl']
                 all_sholl.extend(list(zip(sholl['radii'], sholl['nintersections'])))
+                all_centroids.extend(centroid_pts)
+                soma = np.array(queries[0]["smorph"]["sholl"]["center"].copy())
+                soma = bounds[0][:3] + soma
+                all_soma.append(soma)
 
             all_sholl = DataFrame(all_sholl, columns=['radii', 'nintersections'])
             mean_sholl = all_sholl.groupby('radii').sum() / len(child_cells)
@@ -90,17 +136,17 @@ def make_tree_widget(parent, file_names=[]):
             parent.fig.ax.legend()
             parent.fig.draw()
 
-            labels = np.zeros_like(parent.parent_viewer.layers['tissue'].data, dtype=int)
+            labels = np.zeros_like(
+                    parent.parent_viewer.layers['tissue'].data,
+                    dtype=int
+                    )
             labels = reconstruct_labels(all_bounds, all_ims, out=labels)
+            skel = skeletonize(labels > 0).astype(int)
 
-            layer_names = [layer.name for layer in parent.parent_viewer.layers]
-            if 'labels' in layer_names:
-                parent.parent_viewer.layers['labels'].data = labels
-            else:
-                parent.parent_viewer.add_labels(
-                        labels, rendering='translucent', opacity=.5,
-                        scale=parent.current_scale
-                        )
+            populate_visualizations(
+                    parent, layer_names, labels, all_centroids, all_soma, skel
+                    )
+
             parent.parent_viewer.reset_view()
 
         if key.endswith('.tif'):
@@ -109,19 +155,19 @@ def make_tree_widget(parent, file_names=[]):
                 bounds, centroid_pts, _ = _get_roi_scaled_points(queries)
 
                 im, _, _ = imread(key)
-                print(key)
-                labels = np.zeros_like(parent.parent_viewer.layers['tissue'].data, dtype=int)
-                print(bounds, im.shape)
-                labels = reconstruct_labels(bounds, [im > 0], out=labels)
+                bin_im = im > 0
+                labels = np.zeros_like(
+                        parent.parent_viewer.layers['tissue'].data,
+                        dtype=int
+                        )
+                labels = reconstruct_labels(bounds, [bin_im], out=labels)
+                skel = skeletonize(labels > 0).astype(int)
+                soma = np.array(queries[0]["smorph"]["sholl"]["center"].copy())
+                soma = bounds[0][:3] + soma
 
-                layer_names = [layer.name for layer in parent.parent_viewer.layers]
-                if 'labels' in layer_names:
-                    parent.parent_viewer.layers['labels'].data = labels
-                else:
-                    parent.parent_viewer.add_labels(
-                            labels, rendering='translucent', opacity=.5,
-                            scale=parent.current_scale
-                            )
+                populate_visualizations(
+                        parent, layer_names, labels, centroid_pts, soma, skel
+                        )
 
                 for i, c in enumerate(centroid_pts):
                     scaled_c = np.array(c) * np.array(queries[i]['scale'])
