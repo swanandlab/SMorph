@@ -231,16 +231,21 @@ class InteractiveSegmentation:
         class Watershed:
             prompt = field(int, widget_type="Label", options={"value": 
                 "Edit the `somas_coords` layer using layer controls"})
+            cache_labels, cache_segmented = None, None
 
             def add_selected_point_seed(self):
                 coord_to_add = self.parent_viewer.layers['selected point'].data[0]
                 self.parent_viewer.layers['somas_coords'].add(coord_to_add)
 
+            def undo_last_overwrite(self):
+                # press manual afterwards
+                self.parent_viewer.layers['labels'].data = self.cache_labels
+                self.parent_viewer.layers['segmented'].data = self.cache_segmented
+
             def seeded_watershed(self):
                 grandparent = self.__magicclass_parent__.__magicclass_parent__
                 pipe = grandparent.__magicclass_parent__.__magicclass_parent__.__magicclass_parent__.pipe
                 SEARCH_LAYER = "somas_coords"
-                layer_names = [layer.name for layer in self.parent_viewer.layers]
                 somas_estimates = np.unique(self.parent_viewer.layers[SEARCH_LAYER].data, axis=0)
                 filtered_regions, residue = [], []
                 separated_clumps = []
@@ -330,10 +335,11 @@ class InteractiveSegmentation:
                 greatgrandparent.RegionSelector.selected_region.range = (0, len(regions)-1)
 
                 if 'labels' in layer_names:
+                    self.cache_labels = self.parent_viewer.layers['labels'].data
                     self.parent_viewer.layers['labels'].data = watershed_results
                 if 'segmented' in layer_names:
+                    self.cache_segmented = self.parent_viewer.layers['segmented'].data
                     self.parent_viewer.layers['segmented'].data = pipe.imsegmented.copy()
-            ################
 
         @magicclass(widget_type="none")
         class Manual:
