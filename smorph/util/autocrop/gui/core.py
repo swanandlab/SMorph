@@ -415,7 +415,7 @@ class InteractiveSegmentation:
             greatgrandparent.ExportCells.bandpass_vol
             viewer.window.remove_dock_widget(
                 viewer.window._dock_widgets["Bandpass Volume"])
-        except AttributeError:
+        except (AttributeError, KeyError) as err:
             pass
 
         bandpass_vol = superqt.QLabeledRangeSlider()
