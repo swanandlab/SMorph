@@ -6,10 +6,7 @@ from PyQt5.QtCore import Qt, QAbstractItemModel, QModelIndex
 from PyQt5.QtWidgets import QTreeView
 from skimage.morphology import skeletonize
 
-from .viewer import (
-    _get_roi_scaled_points,
-    _read_images,
-)
+from .viewer import _get_roi_scaled_points
 from .._io import imread
 
 
@@ -76,14 +73,14 @@ def populate_visualizations(parent, layer_names, labels, centroids, soma, skel):
 
 
 class ImageTree(FreeWidget):
-    def __init__(self, parent, file_names):
+    def __init__(self, parent, tree, dataset):
         super().__init__()
-        self.wdt = make_tree_widget(parent, file_names)
+        self.wdt = make_tree_widget(parent, tree, dataset)
         self.set_widget(self.wdt)
 
 
-def make_tree_widget(parent, file_names=[]):
-    tree, dataset = _read_images(file_names)
+def make_tree_widget(parent, tree, dataset):
+    greatgrandparent = parent.__magicclass_parent__.__magicclass_parent__
     headers = ["Images"]
 
     tree_view = QTreeView()  # Instantiate the View
@@ -92,8 +89,8 @@ def make_tree_widget(parent, file_names=[]):
     tree_view.setModel(model)
     tree_view.expandAll()
     tree_view.resizeColumnToContents(0)
-    tissue_sholl = parent.fig.ax.plot([], [], label='tissue')[0]
-    cell_sholl = parent.fig.ax.plot([], [], label='cell')[0]
+    tissue_sholl = greatgrandparent.fig.ax.plot([], [], label='tissue')[0]
+    cell_sholl = greatgrandparent.fig.ax.plot([], [], label='cell')[0]
 
     # set up callbacks whenever the selection changes
     selection = tree_view.selectionModel()
@@ -131,10 +128,10 @@ def make_tree_widget(parent, file_names=[]):
             mean_sholl = all_sholl.groupby('radii').sum() / len(child_cells)
             tissue_sholl.set_xdata(mean_sholl.index.tolist())
             tissue_sholl.set_ydata(mean_sholl['nintersections'].tolist())
-            parent.fig.ax.relim()
-            parent.fig.ax.autoscale()
-            parent.fig.ax.legend()
-            parent.fig.draw()
+            greatgrandparent.fig.ax.relim()
+            greatgrandparent.fig.ax.autoscale()
+            greatgrandparent.fig.ax.legend()
+            greatgrandparent.fig.draw()
 
             labels = np.zeros_like(
                     parent.parent_viewer.layers['tissue'].data,
@@ -175,10 +172,10 @@ def make_tree_widget(parent, file_names=[]):
                     sholl = queries[i]['smorph']['sholl']
                     cell_sholl.set_xdata(sholl['radii'])
                     cell_sholl.set_ydata(sholl['nintersections'])
-                    parent.fig.ax.relim()
-                    parent.fig.ax.autoscale()
-                    parent.fig.ax.legend()
-                    parent.fig.draw()
+                    greatgrandparent.fig.ax.relim()
+                    greatgrandparent.fig.ax.autoscale()
+                    greatgrandparent.fig.ax.legend()
+                    greatgrandparent.fig.draw()
 
     return tree_view
 

@@ -18,6 +18,16 @@ def mkdir_if_not(name):
         mkdir(name)
 
 
+def _load_group(group, file_names, group_data):
+    """"In place load group images."""
+    for imfile in listdir(group):
+        if not imfile.startswith('.'):  # skip hidden files
+            name = group + '/' + imfile
+            file_names.append(name)
+            image = io.imread(name)
+            group_data.append(image)
+
+
 def read_group_dirs(group_dirs):
     """Synchronously read list of folders for images.
 
@@ -38,12 +48,11 @@ def read_group_dirs(group_dirs):
 
     for group in group_dirs:
         group_data = []
-        for file in listdir(group):
-            if not file.startswith('.'):  # skip hidden files
-                name = group + '/' + file
-                file_names.append(name)
-                image = io.imread(name)
-                group_data.append(image)
+        if isinstance(group, str):
+            _load_group(group, file_names, group_data)
+        elif isinstance(group, (list, tuple)):
+            for ingroup in group:
+                _load_group(ingroup, file_names, group_data)
         dataset.append(group_data)
 
     return file_names, dataset

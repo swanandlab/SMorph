@@ -1,6 +1,7 @@
 import winsound
 import json
 import re
+from itertools import repeat
 from os import (
     getcwd,
     listdir,
@@ -33,9 +34,9 @@ from skimage import filters
 from skimage.measure import label
 from vispy.geometry.rect import Rect
 
-from .tree_widget import (
-    ImageTree
-)
+from .tissue_list import GroupsClassifier, TissueElement
+from .tree_widget import ImageTree
+from .viewer import _read_images
 from .. import (
     core,
     _preprocess as preprocess,
@@ -1062,6 +1063,8 @@ class Autocrop:
         SEGMENTED = field(True)
         SHOLL_STEP_SIZE = field(3)
         POLYNOMIAL_DEGREE = field(3)
+        datatree = None
+        dataset = None
 
         def analyze(self):
             parent = self.__magicclass_parent__
@@ -1126,7 +1129,7 @@ class Autocrop:
             jasp_friendly = DataFrame(jasp_friendly, columns=jasp_friendly_cols)
 
             try:
-                parent.Visualize.ImageTree
+                parent.Visualize.VisOptions.TreeViewer.ImageTree
                 parent.Visualize.fig.ax.clear()
             except AttributeError:
                 pass
@@ -1153,61 +1156,136 @@ class Autocrop:
             write_buffer[df_polynomial_plots.columns] = df_polynomial_plots
 
             try:
-                parent.Visualize.ImageTree
-                parent.Visualize.remove('ImageTree')
+                parent.Visualize.VisOptions.TreeViewer.ImageTree
+                parent.Visualize.VisOptions.TreeViewer.remove('ImageTree')
+                parent.Visualize.VisOptions.GroupAnalysis.groups_classifier.all.selectable_evented_tissues.clear()
+                parent.Visualize.VisOptions.GroupAnalysis.groups_classifier.Groups.Group1.group_list.selectable_evented_tissues.clear()
+                parent.Visualize.VisOptions.GroupAnalysis.groups_classifier.Groups.Group2.group_list.selectable_evented_tissues.clear()
             except AttributeError:
                 pass
 
-            tree_view = ImageTree(parent.Visualize, file_names)
+            tree, dataset = _read_images(file_names)
+            tree_view = ImageTree(parent.Visualize.VisOptions.TreeViewer, tree, dataset)
             tree_view.name = 'ImageTree'
 
-            parent.Visualize.append(tree_view)
+            parent.Visualize.VisOptions.TreeViewer.append(tree_view)
 
-            if groups.save:
-                # single_cell_intersections
-                OUTFILE = 'sholl_intersections.csv'
-                df_to_csv(write_buffer, groups.out_dir, OUTFILE)
-                df_to_csv(jasp_friendly, groups.out_dir, 'sholl_intersections_jasp.csv')
+            for tissue in tree.keys():
+                parent.Visualize.VisOptions.GroupAnalysis.groups_classifier.all.selectable_evented_tissues.append(TissueElement(tissue))
 
-                OUTPLOT = f'avg_sholl_plot.{groups.fig_format}'
-                savefig(fig, path.join(groups.out_dir, OUTPLOT))
+            # if groups.save:
+            #     # single_cell_intersections
+            #     OUTFILE = 'sholl_intersections.csv'
+            #     df_to_csv(write_buffer, groups.out_dir, OUTFILE)
+            #     df_to_csv(jasp_friendly, groups.out_dir, 'sholl_intersections_jasp.csv')
 
+            #     OUTPLOT = f'avg_sholl_plot.{groups.fig_format}'
+            #     savefig(fig, path.join(groups.out_dir, OUTPLOT))
+
+            self.datatree, self.dataset = tree, dataset
             parent.current_index = 6
 
     @magicclass(widget_type="scrollable")
     class Visualize:
         fig = Figure()
-        current_tissue = None
-        current_scale = (1, 1, 1)
 
-        @magicclass(layout="horizontal", widget_type="none")
-        class ModifyVis:
-            seg_labels = field(True)
-            soma = field(False)
-            centroid = field(False)
-            skel = field(False)
+        @magicclass(widget_type="tabbed")
+        class VisOptions:
+            @magicclass(widget_type="scrollable")
+            class TreeViewer:
+                current_tissue = None
+                current_scale = (1, 1, 1)
 
-            @seg_labels.connect
-            @soma.connect
-            @centroid.connect
-            @skel.connect
-            def _remove_unchecked_layer(self):
-                if not self.seg_labels.value:
-                    layer_names = [layer.name for layer in self.parent_viewer.layers]
-                    if 'labels' in layer_names:
-                        self.parent_viewer.layers.remove('labels')
+                @magicclass(layout="horizontal", widget_type="groupbox")
+                class ModifyVis:
+                    seg_labels = field(True)
+                    soma = field(False)
+                    centroid = field(False)
+                    skel = field(False)
 
-                if not self.soma.value:
-                    layer_names = [layer.name for layer in self.parent_viewer.layers]
-                    if 'soma' in layer_names:
-                        self.parent_viewer.layers.remove('soma')
+                    @seg_labels.connect
+                    @soma.connect
+                    @centroid.connect
+                    @skel.connect
+                    def _remove_unchecked_layer(self):
+                        if not self.seg_labels.value:
+                            layer_names = [layer.name for layer in self.parent_viewer.layers]
+                            if 'labels' in layer_names:
+                                self.parent_viewer.layers.remove('labels')
 
-                if not self.centroid.value:
-                    layer_names = [layer.name for layer in self.parent_viewer.layers]
-                    if 'centroid' in layer_names:
-                        self.parent_viewer.layers.remove('centroid')
+                        if not self.soma.value:
+                            layer_names = [layer.name for layer in self.parent_viewer.layers]
+                            if 'soma' in layer_names:
+                                self.parent_viewer.layers.remove('soma')
 
-                if not self.skel.value:
-                    layer_names = [layer.name for layer in self.parent_viewer.layers]
-                    if 'skeleton' in layer_names:
-                        self.parent_viewer.layers.remove('skeleton')
+                        if not self.centroid.value:
+                            layer_names = [layer.name for layer in self.parent_viewer.layers]
+                            if 'centroid' in layer_names:
+                                self.parent_viewer.layers.remove('centroid')
+
+                        if not self.skel.value:
+                            layer_names = [layer.name for layer in self.parent_viewer.layers]
+                            if 'skeleton' in layer_names:
+                                self.parent_viewer.layers.remove('skeleton')
+
+            @magicclass(widget_type="scrollable")
+            class GroupAnalysis:
+                groups_classifier = GroupsClassifier()
+
+                def analyze(self):
+                    grandparent = self.__magicclass_parent__.__magicclass_parent__
+                    greatgrandparent = grandparent.__magicclass_parent__
+                    analyze_wdt = greatgrandparent.Analyze
+
+                    classified_tissues = []
+                    groups = self.groups_classifier.Groups.__magicclass_children__
+                    for group in groups:
+                        gui_tissue = group.group_list.selectable_evented_tissues
+                        classified_tissues.append([
+                                elem_tissue.name for elem_tissue in gui_tissue
+                                ])
+
+                    all_sholl = []
+                    group_counts = []
+                    x = []
+                    labels = []
+                    for i, group in enumerate(classified_tissues):
+                        ncell = 0
+                        labels.append(f'grp{i+1}')
+                        for tissue in group:
+                            if tissue is not None:
+                                dict_cells = list(analyze_wdt.dataset[tissue].values())[0]
+
+                                for imcell, metadata in dict_cells.items():
+                                    sholl = metadata["smorph"]["sholl"]
+                                    # zip w/ scalar
+                                    # all_sholl.extend(list(zip(
+                                    #         repeat(f'grp{i+1}'),
+                                    #         sholl['radii'],
+                                    #         sholl['nintersections']
+                                    #         )))
+                                    if len(sholl['radii']) > len(x):
+                                        x = sholl['radii']
+                                    all_sholl.append(sholl['nintersections'])
+                                ncell += len(dict_cells.items())
+                        group_counts.append(ncell)
+
+                    cols = ['label', 'radius', 'nintersections']
+                    df = []
+                    csum_group_counts = np.cumsum(group_counts)
+                    for itercell in range(len(all_sholl)):
+                        for iterradii, r in enumerate(x):
+                            nintersections = (0 if iterradii >= len(all_sholl[itercell])
+                                else all_sholl[itercell][iterradii])
+                            row = [
+                                labels[np.digitize(itercell, csum_group_counts)],
+                                r,
+                                nintersections
+                            ]
+                            df.append(row)
+                    df = DataFrame(df, columns=cols)
+                    grandparent.fig.ax.clear()
+                    sns.lineplot(
+                            data=df, x="radius", y="nintersections", hue="label",
+                            ci=68, ax=grandparent.fig.ax
+                            )

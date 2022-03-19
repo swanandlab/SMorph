@@ -267,6 +267,7 @@ def _analyze_cells(groups):
                     center=list(map(int, cell.skel_soma)),
                     radii=list(np.arange(radius, max_radius+radius, radius)),
                     nintersections=list(map(int, cell._non_zero_sholl_intersections)),
+                    nintersections_original=list(map(int, cell._sholl_intersections)),
                 ))
             except Exception as err:
                 bad_cells_idx.append(cell_cnt - 1)
@@ -481,8 +482,9 @@ class Groups:
 
         len_polynomial_plots = max(map(len, polynomial_plots))
 
-        polynomial_plots = np.array([
-            x+[0]*(len_polynomial_plots-len(x)) for x in polynomial_plots])
+        polynomial_plots = np.asarray([
+            np.pad(x, (0, len_polynomial_plots-len(x)), mode='constant') for x in polynomial_plots])
+        #    x+[0]*(len_polynomial_plots-len(x)) for x in polynomial_plots])
 
         x = np.arange(sholl_step_sz,
             sholl_step_sz * (len_polynomial_plots + 1),
