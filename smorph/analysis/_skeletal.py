@@ -428,7 +428,7 @@ def _branch_structure(junctions, branch_stats, paths_list):
 
 def classify_branching_structure(cell, soma_on_skeleton):
     """
-    Won't work of linear cells (tip-tip only)
+    Won't work for linear cells (tip-tip only)
     """
     skel_obj = cell._skeleton
 

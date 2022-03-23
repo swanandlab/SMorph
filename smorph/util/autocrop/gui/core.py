@@ -141,6 +141,13 @@ class RefineSegmentation:
             data += '</table>'
             parent.region_props.setText(data)
 
+            try:
+                parent.InteractiveSegmentation
+                if parent.InteractiveSegmentation.selector is not None:
+                    parent.InteractiveSegmentation._layer_update(False)
+            except AttributeError:
+                pass
+
     @magicclass(widget_type="groupbox")
     class HighPassVolume:
         cutoff=Slider(max=0)
@@ -181,7 +188,7 @@ class RefineSegmentation:
                 parent.append(InteractiveSegmentation())
 
             somas_estimates = core.approximate_somas(pipe.imsegmented, pipe.regions)
-            pipe.somas_estimates = somas_estimates
+            pipe.FINAL_PT_ESTIMATES = pipe.somas_estimates = somas_estimates
             pt_layer = self.parent_viewer.add_points(somas_estimates, face_color='red',
                 edge_width=0, blending='translucent',
                 opacity=.6, size=5, name='somas_coords', scale=pipe.SCALE
@@ -191,6 +198,7 @@ class RefineSegmentation:
                 scale=pipe.SCALE, size=5
                 )
             selector = np.zeros_like(pipe.impreprocessed)
+            parent.InteractiveSegmentation.selector = selector
             selector_layer = self.parent_viewer.add_image(selector, blending='additive', scale=pipe.SCALE)
             self.parent_viewer.layers['labels'].color_mode = 'auto'
 
@@ -226,6 +234,59 @@ class RefineSegmentation:
 
 @magicclass(widget_type="groupbox", visible=True)
 class InteractiveSegmentation:
+    single_region_mode = field(False)
+    selector = None
+
+    @single_region_mode.connect
+    def _layer_update(self, grp_reset_view=True):
+        parent = self.__magicclass_parent__
+        grandparent = parent.__magicclass_parent__
+        viewer = self.parent_viewer
+        pipe = grandparent.__magicclass_parent__.pipe
+        somas_estimates = pipe.FINAL_PT_ESTIMATES
+
+        if self.single_region_mode.value:
+            nregion = parent.RegionSelector.selected_region.value
+            region = pipe.regions[nregion]
+
+            minz, miny, minx, maxz, maxy, maxx = region['bbox']
+            im_unsegmented = pipe.impreprocessed[minz:maxz, miny:maxy, minx:maxx]
+            im_segmented = im_unsegmented * region['image']
+
+            ll = np.asarray([minz, miny, minx])
+            ur = np.asarray([maxz, maxy, maxx]) - 1  # upper-right
+            inidx = np.all(np.logical_and(ll <= somas_estimates, somas_estimates <= ur), axis=1)
+            somas_coords = np.asarray(somas_estimates)[inidx]
+            somas_coords -= ll
+            somas_coords = np.asarray([x for x in somas_coords if region['image'][tuple(x.astype(int))] > 0])
+            labels = label(region['image'])
+            areg = []
+            for coord in somas_coords:
+                areg.append(labels[tuple(coord.astype(np.int64))])
+            visited = []
+            filtered_coords = []
+            for i in range(len(areg)):
+                if areg[i] not in visited:
+                    filtered_coords.append(somas_coords[i])
+                    visited.append(areg[i])
+            filtered_coords = np.asarray(filtered_coords)
+
+            viewer.layers['selector'].data = self.selector[minz:maxz, miny:maxy, minx:maxx]
+            viewer.layers['selected point'].data = np.zeros((1,pipe.imoriginal.ndim))
+            viewer.layers['somas_coords'].data = filtered_coords
+            viewer.layers['labels'].data = pipe.labels[minz:maxz, miny:maxy, minx:maxx] * region['image']
+            viewer.layers['segmented'].data = im_segmented
+            viewer.layers['unsegmented'].data = im_unsegmented
+
+            viewer.reset_view()
+        else:
+            viewer.layers['selector'].data = self.selector
+            viewer.layers['somas_coords'].data = somas_estimates
+            viewer.layers['labels'].data = pipe.labels
+            viewer.layers['segmented'].data = pipe.imsegmented
+            viewer.layers['unsegmented'].data = pipe.impreprocessed
+            if grp_reset_view: viewer.reset_view()
+
     @magicclass(widget_type="tabbed")
     class ClumpSep:
         @magicclass(widget_type="none")
@@ -398,7 +459,7 @@ class InteractiveSegmentation:
         # After all changes (for reproducibility)
         label_diff = (pipe.imbinary).astype(np.int) - bin_refined.astype(np.int)
         pipe.label_diff = label_diff
-        final_soma = np.unique(viewer.layers['somas_coords'].data, axis=0)
+        final_soma = np.unique(pipe.FINAL_PT_ESTIMATES, axis=0)
         pipe.FINAL_PT_ESTIMATES = final_soma
 
         # Update changes for viewer

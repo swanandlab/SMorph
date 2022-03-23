@@ -651,12 +651,7 @@ class TissueImage:
         roi_name=None,
         ref_im_path=None,
         ref_roi_path=None,
-        out_dir='Autocropped',
-        ex_wavelen=None,
-        em_wavelen=None,
-        num_aperture=None,
-        refr_index=None,
-        pinhole_radius=None
+        out_dir='Autocropped'
     ):
         if not (
             (roi_path in (None, '') and roi_name in (None, ''))
