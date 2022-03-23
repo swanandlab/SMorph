@@ -1428,7 +1428,7 @@ class TissueImage:
             FINAL_PT_ESTIMATES = np.vstack((FINAL_PT_ESTIMATES, somas_coords+ll))
             FINAL_PT_ESTIMATES = np.unique(FINAL_PT_ESTIMATES, axis=0)
             self.FINAL_PT_ESTIMATES = FINAL_PT_ESTIMATES
-    
+
         @magicgui(
             call_button="Confirm and apply all changes"
         )

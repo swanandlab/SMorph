@@ -241,9 +241,9 @@ class InteractiveSegmentation:
     def _layer_update(self, grp_reset_view=True):
         parent = self.__magicclass_parent__
         grandparent = parent.__magicclass_parent__
-        viewer = self.parent_viewer
         pipe = grandparent.__magicclass_parent__.pipe
         somas_estimates = pipe.FINAL_PT_ESTIMATES
+        viewer = self.parent_viewer
 
         if self.single_region_mode.value:
             nregion = parent.RegionSelector.selected_region.value
@@ -300,72 +300,93 @@ class InteractiveSegmentation:
                 self.parent_viewer.layers['somas_coords'].add(coord_to_add)
 
             def undo_last_overwrite(self):
-                # press manual afterwards
-                self.parent_viewer.layers['labels'].data = self.cache_labels
-                self.parent_viewer.layers['segmented'].data = self.cache_segmented
+                grandparent = self.__magicclass_parent__.__magicclass_parent__
+
+                if not grandparent.single_region_mode.value:
+                    # press manual afterwards
+                    self.parent_viewer.layers['labels'].data = self.cache_labels
+                    self.parent_viewer.layers['segmented'].data = self.cache_segmented
 
             def seeded_watershed(self):
                 grandparent = self.__magicclass_parent__.__magicclass_parent__
-                pipe = grandparent.__magicclass_parent__.__magicclass_parent__.__magicclass_parent__.pipe
-                SEARCH_LAYER = "somas_coords"
-                somas_estimates = np.unique(self.parent_viewer.layers[SEARCH_LAYER].data, axis=0)
-                filtered_regions, residue = [], []
-                separated_clumps = []
+                greatgrandparent = grandparent.__magicclass_parent__
+                pipe = greatgrandparent.__magicclass_parent__.__magicclass_parent__.pipe
+                viewer = self.parent_viewer
 
-                itr = 0
-                for region in pipe.regions:
+                if grandparent.single_region_mode.value:
+                    nregion = greatgrandparent.RegionSelector.selected_region.value
+                    layer_names = [layer.name for layer in viewer.layers]
+                    region = pipe.regions[nregion]
                     minz, miny, minx, maxz, maxy, maxx = region['bbox']
-                    ll = np.array([minz, miny, minx])  # lower-left
-                    ur = np.array([maxz, maxy, maxx]) - 1  # upper-right
-                    inidx = np.all(np.logical_and(ll <= somas_estimates, somas_estimates <= ur), axis=1)
-                    somas_coords = somas_estimates[inidx].astype(np.int64)
+                    ll = np.array([minz, miny, minx])
+                    somas_coords = viewer.layers[layer_names.index('somas_coords')].data.astype(int)
+                    im = pipe.impreprocessed[minz:maxz, miny:maxy, minx:maxx].copy()
+                    im[~region['image']] = 0
 
-                    if len(somas_coords) == 0:
-                        print('Deleted region:', itr)
-                        residue.append(region)
-                    elif len(np.unique(somas_coords.astype(int), axis=0)) > 1:  # clumpSep
-                        somas_coords = somas_coords.astype(int)
-                        somas_coords -= ll
-                        im = pipe.impreprocessed[minz:maxz, miny:maxy, minx:maxx].copy()
-                        im[~region['image']] = 0
-                        markers = np.zeros(region['image'].shape)
+                    markers = np.zeros(region['image'].shape)
+                    for i in range(somas_coords.shape[0]):
+                        markers[tuple(somas_coords[i])] = i + 1
 
-                        somas_coords = np.array([x for x in somas_coords if region['image'][tuple(x)] > 0])
+                    watershed_results = _segment_clump(im, markers)
+                else:
+                    somas_estimates = np.unique(viewer.layers["somas_coords"].data, axis=0)
+                    filtered_regions, residue = [], []
+                    separated_clumps = []
 
-                        if len(somas_coords) == 0:  # no marked point ROI
+                    itr = 0
+                    for region in pipe.regions:
+                        minz, miny, minx, maxz, maxy, maxx = region['bbox']
+                        ll = np.array([minz, miny, minx])  # lower-left
+                        ur = np.array([maxz, maxy, maxx]) - 1  # upper-right
+                        inidx = np.all(np.logical_and(ll <= somas_estimates, somas_estimates <= ur), axis=1)
+                        somas_coords = somas_estimates[inidx].astype(np.int64)
+
+                        if len(somas_coords) == 0:
                             print('Deleted region:', itr)
+                            residue.append(region)
+                        elif len(np.unique(somas_coords.astype(int), axis=0)) > 1:  # clumpSep
+                            somas_coords = somas_coords.astype(int)
+                            somas_coords -= ll
+                            im = pipe.impreprocessed[minz:maxz, miny:maxy, minx:maxx].copy()
+                            im[~region['image']] = 0
+                            markers = np.zeros(region['image'].shape)
 
-                        if somas_coords.shape[0] == 1:
+                            somas_coords = np.array([x for x in somas_coords if region['image'][tuple(x)] > 0])
+
+                            if len(somas_coords) == 0:  # no marked point ROI
+                                print('Deleted region:', itr)
+
+                            if somas_coords.shape[0] == 1:
+                                filtered_regions.append(region)
+                                continue
+
+                            for i in range(somas_coords.shape[0]):
+                                markers[tuple(somas_coords[i])] = i + 1
+                                separated_clumps.append(somas_coords[i])
+
+                            labels = _segment_clump(im, markers)
+                            separated_regions = core.arrange_regions(labels)
+                            for r in separated_regions:
+                                r['centroid'] = (minz + r['centroid'][0], miny + r['centroid'][1], minx + r['centroid'][2])
+                                r['bbox'] = (minz + r['bbox'][0], miny + r['bbox'][1], minx + r['bbox'][2],
+                                    minz + r['bbox'][3], miny + r['bbox'][4], minx + r['bbox'][5]
+                                    )
+                                # r.slice = (slice(minz + r.bbox[0], minz + r.bbox[3]),
+                                #            slice(miny + r.bbox[1], miny + r.bbox[4]),
+                                #         slice(minx + r.bbox[2], minx + r.bbox[5]))
+                            print('Splitted clump region:', itr)
+                            filtered_regions.extend(separated_regions)
+                        else:
                             filtered_regions.append(region)
-                            continue
+                        itr += 1
 
-                        for i in range(somas_coords.shape[0]):
-                            markers[tuple(somas_coords[i])] = i + 1
-                            separated_clumps.append(somas_coords[i])
-
-                        labels = _segment_clump(im, markers)
-                        separated_regions = core.arrange_regions(labels)
-                        for r in separated_regions:
-                            r['centroid'] = (minz + r['centroid'][0], miny + r['centroid'][1], minx + r['centroid'][2])
-                            r['bbox'] = (minz + r['bbox'][0], miny + r['bbox'][1], minx + r['bbox'][2],
-                                minz + r['bbox'][3], miny + r['bbox'][4], minx + r['bbox'][5]
-                                )
-                            # r.slice = (slice(minz + r.bbox[0], minz + r.bbox[3]),
-                            #            slice(miny + r.bbox[1], miny + r.bbox[4]),
-                            #         slice(minx + r.bbox[2], minx + r.bbox[5]))
-                        print('Splitted clump region:', itr)
-                        filtered_regions.extend(separated_regions)
-                    else:
-                        filtered_regions.append(region)
-                    itr += 1
-
-                pipe.filtered_regions = filtered_regions
-                pipe.residue = residue
-                watershed_results = np.zeros_like(pipe.impreprocessed, dtype=int)
-                for itr in range(len(filtered_regions)):
-                    minz, miny, minx, maxz, maxy, maxx = filtered_regions[itr]['bbox']
-                    watershed_results[minz:maxz, miny:maxy, minx:maxx] += filtered_regions[itr]['image'] * (itr + 1)
-                self.parent_viewer.add_labels(
+                    pipe.filtered_regions = filtered_regions
+                    pipe.residue = residue
+                    watershed_results = np.zeros_like(pipe.impreprocessed, dtype=int)
+                    for itr in range(len(filtered_regions)):
+                        minz, miny, minx, maxz, maxy, maxx = filtered_regions[itr]['bbox']
+                        watershed_results[minz:maxz, miny:maxy, minx:maxx] += filtered_regions[itr]['image'] * (itr + 1)
+                viewer.add_labels(
                     watershed_results, opacity=.7,
                     scale=pipe.SCALE, rendering='translucent'
                     )
@@ -375,33 +396,46 @@ class InteractiveSegmentation:
                 greatgrandparent = grandparent.__magicclass_parent__
                 pipe = greatgrandparent.__magicclass_parent__.__magicclass_parent__.pipe
                 layer_names = [layer.name for layer in self.parent_viewer.layers]
-                pipe.filtered_regions = sorted(pipe.filtered_regions, key=lambda region: region['vol'])
 
-                # After all changes (for reproducibility)
-                final_soma = np.unique(self.parent_viewer.layers['somas_coords'].data, axis=0)
+                if grandparent.single_region_mode.value:
+                    # won't change the labels, only somas_coords
+                    # still have to do tissue watershed afterwards
+                    nregion = greatgrandparent.RegionSelector.selected_region.value
+                    region = pipe.regions[nregion]
+                    minz, miny, minx, maxz, maxy, maxx = region['bbox']
+                    ll = np.array([minz, miny, minx])
 
-                pipe.FINAL_PT_ESTIMATES = final_soma
+                    somas_coords = self.parent_viewer.layers["somas_coords"].data
+                    final_soma = pipe.FINAL_PT_ESTIMATES
+                    final_soma = np.vstack((final_soma, somas_coords+ll))
+                    final_soma = np.unique(final_soma, axis=0)
+                    pipe.FINAL_PT_ESTIMATES = final_soma
+                else:
+                    # After all changes (for reproducibility)
+                    final_soma = np.unique(self.parent_viewer.layers['somas_coords'].data, axis=0)
 
-                pipe.regions = regions = pipe.filtered_regions
-                watershed_results = np.zeros_like(pipe.impreprocessed, dtype=int)
-                for itr in range(len(regions)):
-                    minz, miny, minx, maxz, maxy, maxx = regions[itr]['bbox']
-                    watershed_results[minz:maxz, miny:maxy, minx:maxx] += regions[itr]['image'] * (itr + 1)
+                    pipe.FINAL_PT_ESTIMATES = final_soma
+                    pipe.regions = regions = pipe.filtered_regions
 
-                pipe.labels = watershed_results
-                pipe.imsegmented = pipe.impreprocessed * (watershed_results > 0)
+                    watershed_results = np.zeros_like(pipe.impreprocessed, dtype=int)
+                    for itr in range(len(regions)):
+                        minz, miny, minx, maxz, maxy, maxx = regions[itr]['bbox']
+                        watershed_results[minz:maxz, miny:maxy, minx:maxx] += regions[itr]['image'] * (itr + 1)
+
+                    pipe.labels = watershed_results
+                    pipe.imsegmented = pipe.impreprocessed * (watershed_results > 0)
+
+                    greatgrandparent.RegionSelector.selected_region.range = (0, len(regions)-1)
+
+                    if 'labels' in layer_names:
+                        self.cache_labels = self.parent_viewer.layers['labels'].data
+                        self.parent_viewer.layers['labels'].data = watershed_results
+                    if 'segmented' in layer_names:
+                        self.cache_segmented = self.parent_viewer.layers['segmented'].data
+                        self.parent_viewer.layers['segmented'].data = pipe.imsegmented.copy()
 
                 # Update changes for viewer
                 self.parent_viewer.layers.remove('watershed_results')
-
-                greatgrandparent.RegionSelector.selected_region.range = (0, len(regions)-1)
-
-                if 'labels' in layer_names:
-                    self.cache_labels = self.parent_viewer.layers['labels'].data
-                    self.parent_viewer.layers['labels'].data = watershed_results
-                if 'segmented' in layer_names:
-                    self.cache_segmented = self.parent_viewer.layers['segmented'].data
-                    self.parent_viewer.layers['segmented'].data = pipe.imsegmented.copy()
 
         @magicclass(widget_type="none")
         class Manual:
@@ -410,13 +444,24 @@ class InteractiveSegmentation:
 
             def reset_changes(self):
                 grandparent = self.__magicclass_parent__.__magicclass_parent__
-                pipe = grandparent.__magicclass_parent__.__magicclass_parent__.__magicclass_parent__.pipe
-                self.parent_viewer.layers["labels"].data = pipe.labels
+                greatgrandparent = grandparent.__magicclass_parent__
+                pipe = greatgrandparent.__magicclass_parent__.__magicclass_parent__.pipe
+
+                if grandparent.single_region_mode.value:
+                    nregion = greatgrandparent.RegionSelector.selected_region.value
+                    region = pipe.regions[nregion]
+
+                    minz, miny, minx, maxz, maxy, maxx = region['bbox']
+                    self.parent_viewer.layers['labels'].data = pipe.labels[minz:maxz, miny:maxy, minx:maxx] * region['image']
+                else:
+                    self.parent_viewer.layers["labels"].data = pipe.labels
 
             def apply_changes(self):
                 grandparent = self.__magicclass_parent__.__magicclass_parent__
-                pipe = grandparent.__magicclass_parent__.__magicclass_parent__.__magicclass_parent__.pipe
+                greatgrandparent = grandparent.__magicclass_parent__
+                pipe = greatgrandparent.__magicclass_parent__.__magicclass_parent__.pipe
                 refined = label(self.parent_viewer.layers['labels'].data)
+
                 self.parent_viewer.add_labels(refined, scale=pipe.SCALE,
                     name="manual_labels", rendering='translucent'
                     )
@@ -429,21 +474,28 @@ class InteractiveSegmentation:
                 refined = self.parent_viewer.layers["manual_labels"].data
                 bin_refined = refined > 0
 
-                pipe.labels = refined
-                pipe.imsegmented = pipe.impreprocessed * bin_refined
-                pipe.regions = core.arrange_regions(refined)
+                if grandparent.single_region_mode.value:
+                    nregion = greatgrandparent.RegionSelector.selected_region.value
+                    region = pipe.regions[nregion]
+
+                    minz, miny, minx, maxz, maxy, maxx = region['bbox']
+                    pipe.labels[minz:maxz, miny:maxy, minx:maxx] *= ~region['image']  # delete label
+                    pipe.labels[minz:maxz, miny:maxy, minx:maxx] += refined
+                else:
+                    pipe.labels = refined
+                    pipe.imsegmented = pipe.impreprocessed * bin_refined
+                    pipe.regions = core.arrange_regions(refined)
+
+                    greatgrandparent.RegionSelector.selected_region.range = (0, len(pipe.regions)-1)
+
+                    if 'labels' in layer_names:
+                        self.parent_viewer.layers['labels'].data = refined.copy()
+                    if 'segmented' in layer_names:
+                        self.parent_viewer.layers['segmented'].data = pipe.imsegmented.copy()
 
                 # Update changes for viewer
                 self.parent_viewer.layers.remove("manual_labels")
 
-                greatgrandparent.RegionSelector.selected_region.range = (0, len(pipe.regions)-1)
-
-                if 'labels' in layer_names:
-                    self.parent_viewer.layers['labels'].data = refined.copy()
-                if 'segmented' in layer_names:
-                    self.parent_viewer.layers['segmented'].data = pipe.imsegmented.copy()
-
-    
     def confirm_all(self):
         parent = self.__magicclass_parent__
         grandparent = parent.__magicclass_parent__
