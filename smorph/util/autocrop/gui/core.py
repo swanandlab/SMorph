@@ -567,7 +567,6 @@ class InteractiveSegmentation:
         vol_cutoff_update()
 
 
-
 def _auto_params_deconv(pipe):
     impath = pipe.im_path.lower()
     if impath.split('.')[-1] == 'czi':

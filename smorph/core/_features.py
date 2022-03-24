@@ -64,15 +64,13 @@ def _extract_cell_features(cell, shell_step_size, polynomial_degree):
 
     (
         branching_structure,
-        terminal_branches,
-        coords
+        terminal_branches
     ) = classify_branching_structure(cell, soma_on_skeleton)
 
     cell.skel_soma = soma_on_skeleton
     cell._padded_skeleton = padded_skeleton
     cell._pad_sk_soma = pad_sk_soma
     cell._branching_struct = branching_structure
-    cell._branch_coords = coords
 
     (
         n_primary_branches,

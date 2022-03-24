@@ -64,7 +64,7 @@ class Cell:
     """
     __slots__ = ('image', 'image_type', 'scale', 'cleaned_image', 'features',
                  'convex_hull', 'skeleton', 'sholl_step_size', '_fork_coords',
-                 '_branch_coords', '_branching_struct', '_concentric_coords',
+                 '_branching_struct', '_concentric_coords',
                  '_sholl_intersections', '_padded_skeleton', '_pad_sk_soma',
                  '_sholl_polynomial_model', '_polynomial_sholl_radii',
                  '_non_zero_sholl_intersections', '_skeleton', 'skel_soma')
@@ -162,7 +162,7 @@ class Cell:
             colors = ['red', 'blue', 'magenta', 'green', 'cyan']
 
         branching_structure = self._branching_struct
-        coords = self._branch_coords
+        graph = self._skeleton.graph
         # store same level branch nodes in single array
         color_branches_coords = []
         for branch_level in branching_structure:
@@ -170,7 +170,7 @@ class Cell:
             for path in branch_level:
                 path_coords = []
                 for node in path:
-                    path_coords.append(coords[node])
+                    path_coords.append(graph[node])
                     single_branch_level.extend(path_coords)
             color_branches_coords.append(single_branch_level)
 

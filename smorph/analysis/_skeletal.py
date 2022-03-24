@@ -1,5 +1,7 @@
 import numpy as np
 
+from itertools import compress
+
 from scipy import sparse
 from scipy.ndimage import generate_binary_structure, label
 from skan.csr import (
@@ -175,40 +177,15 @@ def pad_skeleton(cell_skeleton, soma_on_skeleton):
     )
 
 
-def _eliminate_loops(branch_stats, paths_list):
-    """Eliminate loops in branches."""
-    loop_indices = []
-    loop_branch_end_pts = []
+def _eliminate_loops(summary, paths_list):
+    """Eliminate loops in branches. handle all w/ type == 3"""
+    cycle_branch_type = 3
+    cycle_mask = summary['branch-type'] == cycle_branch_type
+    cycle_branches_idx = summary[cycle_mask].index
+    for i in cycle_branches_idx:
+        paths_list[i] = paths_list[i][:-1]  # remove cycle node
 
-    # set that keeps track of what elements have been added
-    seen = set()
-    # eliminate loops from branch statistics
-    for branch_no, branch in enumerate(branch_stats):
-        # If element not in seen, add it to both
-        current = (branch[0], branch[1])
-        if current not in seen:
-            seen.add(current)
-        elif current in seen:
-            # for deleting the loop index from branch statistics
-            loop_indices.append(branch_no)
-            # for deleting paths from paths list by recognizing loop end pts
-            loop_branch_end_pts.append((int(branch[0]), int(branch[1])))
-
-    new_branch_stats = np.delete(branch_stats, loop_indices, axis=0)
-
-    # TODO: no loops on test set
-    # eliminate loops from paths list
-    path_indices = []
-    for loop_end_pts in loop_branch_end_pts:
-        for path_no, path in enumerate(paths_list):
-            if _cmp(loop_end_pts, path):
-                path_indices.append(path_no)
-                break
-
-    new_paths_list = np.delete(np.array(paths_list, dtype=object),
-                               path_indices, axis=0)
-
-    return new_branch_stats, new_paths_list
+    return paths_list
 
 
 def _simplify_graph(skel):
@@ -368,10 +345,10 @@ def get_no_of_forks(cell):
 
 
 def _cmp(branch, path):
-    start_end_pair = [path[0], path[-1]]
+    edge = (path[0], path[-1])
     return (
-        np.all(branch[:2] == start_end_pair)
-        or np.all(branch[:2] == start_end_pair[::-1])
+        np.all(branch == edge)
+        or np.all(branch == edge[::-1])
     )
 
 
@@ -389,87 +366,75 @@ def _branch_structure(junctions, branch_stats, paths_list):
     """
     next_set_junctions = []
     next_set_branches = []
-    term_branches = []
+    junc_to_junc = 2
+    terminal = 1
 
     for junction in junctions:
         branches_travelled = []
-        for branch_no, branch in enumerate(branch_stats):
-            if branch[0] == junction:  # check if start node ID of current branch equals junction
-                if branch[3] == 2:  # junction-junction
-                    next_set_junctions.append(branch[1])  # next process with junction as it's ending node
+        for branch_no, row in enumerate(branch_stats):
+            src, dst, br_type = row
+            if src == junction:  # check if start node ID of current branch equals junction
+                if br_type == junc_to_junc:
+                    next_set_junctions.append(dst)  # next process with junction as it's ending node
                     for path in paths_list:
-                        if _cmp(branch, path):
+                        if _cmp((src, dst), path):
                             next_set_branches.append(path)
                             branches_travelled.append(branch_no)
-                if branch[3] == 1:  # terminal branch
+                if br_type == terminal:
                     for path in paths_list:
-                        if _cmp(branch, path):
-                            term_branches.append(path)
+                        if _cmp((src, dst), path):
                             next_set_branches.append(path)
                             branches_travelled.append(branch_no)
-            elif branch[1] == junction:  # check if end node ID of current branch equals junction
-                if branch[3] == 2:  # junction-junction
-                    next_set_junctions.append(branch[0])
+            elif dst == junction:  # check if end node ID of current branch equals junction
+                if br_type == junc_to_junc:
+                    next_set_junctions.append(src)
                     for path in paths_list:
-                        if _cmp(branch, path):
+                        if _cmp((src, dst), path):
                             next_set_branches.append(path)
                             branches_travelled.append(branch_no)
-                if branch[3] == 1:  # terminal branch
+                if br_type == terminal:
                     for path in paths_list:
-                        if _cmp(branch, path):
-                            term_branches.append(path)
+                        if _cmp((src, dst), path):
                             next_set_branches.append(path)
                             branches_travelled.append(branch_no)
 
         branch_stats = np.delete(branch_stats, branches_travelled, axis=0)
 
-    return next_set_junctions, next_set_branches, term_branches, branch_stats
+    return next_set_junctions, next_set_branches, branch_stats
 
 
-def classify_branching_structure(cell, soma_on_skeleton):
-    """
-    Won't work for linear cells (tip-tip only)
-    """
-    skel_obj = cell._skeleton
+def _get_soma_node(skel, soma_on_skel):
+    distances = np.linalg.norm(skel.coordinates - soma_on_skel, axis=1)
+    soma_node = np.argmin(distances)
+    return soma_node
 
-    def _get_soma_node():
-        near = []
-        for i in range(skel_obj.n_paths):
-            path_coords = skel_obj.path_coordinates(i)
-            amin = np.argmin(np.linalg.norm(path_coords - soma_on_skeleton, axis=1))
-            nearest = path_coords[amin]
-            near.append(nearest)
 
-        near = np.asarray(near)
-        amin = np.argmin(np.linalg.norm(near - soma_on_skeleton, axis=1))
-        soma_on_path = near[amin]
+def _get_soma_branches(soma_node, paths_list):
+    soma_branches = []
+    for path in paths_list:
+        if soma_node in path: soma_branches.append(path)
+    return soma_branches
 
-        for i, j in enumerate(skel_obj.coordinates):
-            if all(soma_on_path == j):
-                soma_node = [i]
-                break
 
-        return soma_node
+def classify_branching_structure(skel, soma_on_skeleton):
+    summary = summarize(skel)
+    branch_stats = summary[['node-id-src', 'node-id-dst', 'branch-type']].to_numpy()
+    paths_list = skel.paths_list()
 
-    def _get_soma_branches(soma_node, paths_list):
-        soma_branches = []
-        for path in paths_list:
-            if soma_node in path:
-                soma_branches.append(path)
-        return soma_branches
+    # get terminal branches
+    term_branch_type = 1
+    term_mask = summary['branch-type'] == term_branch_type
+    term_branches = list(compress(skel.paths_list(), term_mask))
 
-    coords = cell._skeleton.graph
-    branch_stats = summarize(cell._skeleton)[['node-id-src', 'node-id-dst', 'branch-distance', 'branch-type']].to_numpy()
-    paths_list = skel_obj.paths_list()
-
-    terminal_branches = []
     branching_structure_array = []
 
     # get branches containing soma node
-    soma_node = _get_soma_node()
-    soma_branches = _get_soma_branches(soma_node, paths_list)
+    soma_node = _get_soma_node(skel, soma_on_skeleton)
+    soma_branches = _get_soma_branches([soma_node], paths_list)
     if len(soma_branches) > 2:
-        junctions = soma_node  # ID of the soma node (not lying on any branch)
+        # ID of the soma node (not lying on any branch: for skan < 0.11)
+        # (lying on all fork branches: for skan >= 0.11)
+        junctions = [soma_node]
         delete_soma_branch = False
     else:
         # collect first level/primary branches
@@ -477,20 +442,19 @@ def classify_branching_structure(cell, soma_on_skeleton):
         delete_soma_branch = True
 
     # eliminate loops in branches and path lists
-    branch_stats, paths_list = _eliminate_loops(branch_stats, paths_list)
+    paths_list = _eliminate_loops(summary, paths_list)
 
     while True:
-        junctions, branches, term_branch, branch_stats = _branch_structure(
+        junctions, branches, branch_stats = _branch_structure(
             junctions, branch_stats, paths_list)
         branching_structure_array.append(branches)
-        terminal_branches.extend(term_branch)
         if len(junctions) == 0:
             break
 
     if delete_soma_branch:
         branching_structure_array[0].remove(soma_branches[0])
 
-    return branching_structure_array, terminal_branches, coords
+    return branching_structure_array, term_branches
 
 
 def get_primary_branches(branching_struct):
