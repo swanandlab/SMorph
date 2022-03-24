@@ -23,13 +23,20 @@ mpl.rcParams['axes.labelcolor'] = COLOR
 mpl.rcParams['xtick.color'] = COLOR
 mpl.rcParams['ytick.color'] = COLOR
 
-
+from magicclass import magicclass, field
+from magicclass.wrappers import set_design
+from magicclass.widgets import (
+    Figure,
+    FreeWidget,
+)
+from magicgui.widgets import (
+    ComboBox,
+    FloatSlider,
+    Slider,
+)
 from pandas import DataFrame
 from scipy import ndimage as ndi
 from scipy.stats import sem
-from magicgui.widgets import ComboBox, FloatSlider, Slider
-from magicclass import magicclass, field
-from magicclass.widgets import Figure
 from skimage import filters
 from skimage.measure import label
 from vispy.geometry.rect import Rect
@@ -96,6 +103,90 @@ def longest_contiguous_nonzero(vals):
     return best, start_best, end_best
 
 
+@magicclass(widget_type="groupbox")
+class HighPassVolume:
+    cutoff=Slider(max=0)
+    def vol_cutoff_update(self):
+        parent = self.__magicclass_parent__
+        pipe = parent.__magicclass_parent__.__magicclass_parent__.pipe
+        # self.parent_viewer.add_image(pipe.impreprocessed, scale=pipe.SCALE)
+        # self.parent_viewer.add_labels(pipe.labels, rendering='translucent', opacity=.5, scale=pipe.SCALE)
+        pipe.LOW_VOLUME_CUTOFF = self.cutoff.value
+        pipe.labels.fill(0)
+        itr = 1
+        filtered_regions = []
+        for region in pipe.regions:
+            if self.cutoff.value <= region['vol']:
+                minz, miny, minx, maxz, maxy, maxx = region['bbox']
+                pipe.labels[minz:maxz, miny:maxy, minx:maxx] += region['image'] * itr
+                itr += 1
+                filtered_regions.append(region)
+        self.parent_viewer.layers['labels'].data = pipe.labels.copy()
+        pipe.regions = filtered_regions
+        pipe.imsegmented = pipe.impreprocessed * (pipe.labels > 0)
+        parent.RegionSelector.selected_region.range = (0, len(pipe.regions)-1)
+
+        pipe.regions = sorted(pipe.regions, key=lambda region: region['vol'])
+
+        reconstructed_labels = np.zeros(pipe.impreprocessed.shape, dtype=int)
+        for itr in range(len(pipe.regions)):
+            minz, miny, minx, maxz, maxy, maxx = pipe.regions[itr]['bbox']
+            reconstructed_labels[minz:maxz, miny:maxy, minx:maxx] += pipe.regions[itr]['image'] * (itr + 1)
+        pipe.labels = reconstructed_labels
+        pipe.imbinary = reconstructed_labels > 0
+        pipe.imsegmented = pipe.impreprocessed * pipe.imbinary
+        self.parent_viewer.layers['segmented'].data = pipe.imsegmented.copy()
+
+        try:
+            parent.InteractiveSegmentation
+        except AttributeError:
+            parent.append(InteractiveSegmentation())
+
+        somas_estimates = core.approximate_somas(pipe.imsegmented, pipe.regions)
+        pipe.FINAL_PT_ESTIMATES = pipe.somas_estimates = somas_estimates
+        pt_layer = self.parent_viewer.add_points(somas_estimates, face_color='red',
+            edge_width=0, blending='translucent',
+            opacity=.6, size=5, name='somas_coords', scale=pipe.SCALE
+            )
+        ray_layer = self.parent_viewer.add_points(
+            np.zeros(shape=(1, pipe.imoriginal.ndim)), name='selected point',
+            scale=pipe.SCALE, size=5
+            )
+        selector = np.zeros_like(pipe.impreprocessed)
+        parent.InteractiveSegmentation.selector = selector
+        selector_layer = self.parent_viewer.add_image(selector, blending='additive', scale=pipe.SCALE)
+        self.parent_viewer.layers['labels'].color_mode = 'auto'
+
+        # callback function, called on mouse click when volume layer is active
+        @selector_layer.mouse_drag_callbacks.append
+        def on_click(layer, event):
+            near_point, far_point = layer.get_ray_intersections(
+                event.position,
+                event.view_direction,
+                event.dims_displayed
+            )
+
+            if (near_point is not None) and (far_point is not None):
+                ray_points = np.linspace(
+                    near_point, far_point, int(np.max(far_point-near_point)),
+                    endpoint=False
+                    )
+                ray_points = np.round(ray_points).astype(int)  # pixel-coords
+
+                # select pt at mid pt of most intersecting label at line of sight
+                ray_label_vals = [self.parent_viewer.layers['labels'].data[tuple(coords)] for coords in ray_points]
+                subarr, start, end = longest_contiguous_nonzero(ray_label_vals)
+
+                if subarr[0] == 0:
+                    start = 0; end = len(ray_points) -1
+                pt_index = end if start == end else start + (end - start) // 2
+
+                mid_pixel = np.take(ray_points, pt_index, axis=0)
+
+                if ray_points.shape[1] != 0:
+                    ray_layer.data = [mid_pixel]
+
+
 @magicclass(widget_type="none")
 class RefineSegmentation:
     @magicclass(widget_type="groupbox")
@@ -147,90 +238,6 @@ class RefineSegmentation:
                     parent.InteractiveSegmentation._layer_update(False)
             except AttributeError:
                 pass
-
-    @magicclass(widget_type="groupbox")
-    class HighPassVolume:
-        cutoff=Slider(max=0)
-        def vol_cutoff_update(self):
-            parent = self.__magicclass_parent__
-            pipe = parent.__magicclass_parent__.__magicclass_parent__.pipe
-            # self.parent_viewer.add_image(pipe.impreprocessed, scale=pipe.SCALE)
-            # self.parent_viewer.add_labels(pipe.labels, rendering='translucent', opacity=.5, scale=pipe.SCALE)
-            pipe.LOW_VOLUME_CUTOFF = self.cutoff.value
-            pipe.labels.fill(0)
-            itr = 1
-            filtered_regions = []
-            for region in pipe.regions:
-                if self.cutoff.value <= region['vol']:
-                    minz, miny, minx, maxz, maxy, maxx = region['bbox']
-                    pipe.labels[minz:maxz, miny:maxy, minx:maxx] += region['image'] * itr
-                    itr += 1
-                    filtered_regions.append(region)
-            self.parent_viewer.layers['labels'].data = pipe.labels.copy()
-            pipe.regions = filtered_regions
-            pipe.imsegmented = pipe.impreprocessed * (pipe.labels > 0)
-            parent.RegionSelector.selected_region.range = (0, len(pipe.regions)-1)
-
-            pipe.regions = sorted(pipe.regions, key=lambda region: region['vol'])
-
-            reconstructed_labels = np.zeros(pipe.impreprocessed.shape, dtype=int)
-            for itr in range(len(pipe.regions)):
-                minz, miny, minx, maxz, maxy, maxx = pipe.regions[itr]['bbox']
-                reconstructed_labels[minz:maxz, miny:maxy, minx:maxx] += pipe.regions[itr]['image'] * (itr + 1)
-            pipe.labels = reconstructed_labels
-            pipe.imbinary = reconstructed_labels > 0
-            pipe.imsegmented = pipe.impreprocessed * pipe.imbinary
-            self.parent_viewer.layers['segmented'].data = pipe.imsegmented.copy()
-
-            try:
-                parent.InteractiveSegmentation
-            except AttributeError:
-                parent.append(InteractiveSegmentation())
-
-            somas_estimates = core.approximate_somas(pipe.imsegmented, pipe.regions)
-            pipe.FINAL_PT_ESTIMATES = pipe.somas_estimates = somas_estimates
-            pt_layer = self.parent_viewer.add_points(somas_estimates, face_color='red',
-                edge_width=0, blending='translucent',
-                opacity=.6, size=5, name='somas_coords', scale=pipe.SCALE
-                )
-            ray_layer = self.parent_viewer.add_points(
-                np.zeros(shape=(1, pipe.imoriginal.ndim)), name='selected point',
-                scale=pipe.SCALE, size=5
-                )
-            selector = np.zeros_like(pipe.impreprocessed)
-            parent.InteractiveSegmentation.selector = selector
-            selector_layer = self.parent_viewer.add_image(selector, blending='additive', scale=pipe.SCALE)
-            self.parent_viewer.layers['labels'].color_mode = 'auto'
-
-            # callback function, called on mouse click when volume layer is active
-            @selector_layer.mouse_drag_callbacks.append
-            def on_click(layer, event):
-                near_point, far_point = layer.get_ray_intersections(
-                    event.position,
-                    event.view_direction,
-                    event.dims_displayed
-                )
-
-                if (near_point is not None) and (far_point is not None):
-                    ray_points = np.linspace(
-                        near_point, far_point, int(np.max(far_point-near_point)),
-                        endpoint=False
-                        )
-                    ray_points = np.round(ray_points).astype(int)  # pixel-coords
-
-                    # select pt at mid pt of most intersecting label at line of sight
-                    ray_label_vals = [self.parent_viewer.layers['labels'].data[tuple(coords)] for coords in ray_points]
-                    subarr, start, end = longest_contiguous_nonzero(ray_label_vals)
-
-                    if subarr[0] == 0:
-                        start = 0; end = len(ray_points) -1
-                    pt_index = end if start == end else start + (end - start) // 2
-
-                    mid_pixel = np.take(ray_points, pt_index, axis=0)
-
-                    if ray_points.shape[1] != 0:
-                        ray_layer.data = [mid_pixel]
-
 
 @magicclass(widget_type="groupbox", visible=True)
 class InteractiveSegmentation:
@@ -1094,20 +1101,28 @@ class Autocrop:
 
                 gui_refine_seg = parent.RefineSegmentation
                 gui_refine_seg.RegionSelector.selected_region.range = (0, len(pipe.regions)-1)
-                gui_refine_seg.HighPassVolume.cutoff.max = pipe.regions[-1]['vol']
 
                 try:
                     parent.RefineSegmentation.region_props
                 except AttributeError:
                     region_props = PyQt5.QtWidgets.QLabel()
-                    parent.RefineSegmentation.region_props = region_props
 
-                if "Region Properties" not in list(self.parent_viewer.window._dock_widgets.keys()):
-                    self.parent_viewer.window.add_dock_widget(
-                        parent.RefineSegmentation.region_props,
-                        name="Region Properties"
-                        )
-                    self.parent_viewer.window._dock_widgets["Region Properties"].setFixedHeight(270)
+                    @set_design(height=270, min_height=140)
+                    class RegionProps(FreeWidget):
+                        def __init__(self):
+                            super().__init__()
+                            self.wdt = region_props
+                            self.set_widget(self.wdt)
+
+                    parent.RefineSegmentation.region_props = region_props
+                    parent.RefineSegmentation.append(RegionProps())
+
+                try:
+                    parent.RefineSegmentation.HighPassVolume
+                except AttributeError:
+                    parent.RefineSegmentation.append(HighPassVolume())
+                gui_refine_seg.HighPassVolume.cutoff.max = pipe.regions[-1]['vol']
+
                 parent.current_index = 1
                 parent.__magicclass_parent__.ShowSegmented.visible = True
 
