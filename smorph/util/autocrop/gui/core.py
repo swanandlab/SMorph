@@ -533,45 +533,47 @@ class InteractiveSegmentation:
         pipe.n_region = 0
 
         try:
-            greatgrandparent.ExportCells.bandpass_vol
-            viewer.window.remove_dock_widget(
-                viewer.window._dock_widgets["Bandpass Volume"])
+            greatgrandparent.ExportCells.BandpassVolume.bandpass_vol
         except (AttributeError, KeyError) as err:
-            pass
+            bandpass_vol = superqt.QLabeledRangeSlider()
+            bandpass_vol.setRange(0, pipe.regions[-1]['vol'])
+            bandpass_vol.setOrientation(1)
+            bandpass_vol.setValue([pipe.LOW_VOLUME_CUTOFF, pipe.HIGH_VOLUME_CUTOFF])
+            bandpass_vol.setEdgeLabelMode(superqt.sliders._labeled.EdgeLabelMode.NoLabel)
+            bandpass_vol.setContentsMargins(25, 5, 25, 5)
+            for i in (0, 1):
+                # vol_cutoff_slider.children()[i].setAlignment(PyQt5.QtCore.Qt.AlignCenter)
+                bandpass_vol.children()[i].setFixedWidth(len(str(int(pipe.regions[-1]['vol']))) * 20)
 
-        bandpass_vol = superqt.QLabeledRangeSlider()
-        bandpass_vol.setRange(0, pipe.regions[-1]['vol'])
-        bandpass_vol.setOrientation(1)
-        bandpass_vol.setValue([pipe.LOW_VOLUME_CUTOFF, pipe.HIGH_VOLUME_CUTOFF])
-        bandpass_vol.setEdgeLabelMode(superqt.sliders._labeled.EdgeLabelMode.NoLabel)
-        bandpass_vol.setContentsMargins(25, 5, 25, 5)
-        for i in (0, 1):
-            # vol_cutoff_slider.children()[i].setAlignment(PyQt5.QtCore.Qt.AlignCenter)
-            bandpass_vol.children()[i].setFixedWidth(len(str(int(pipe.regions[-1]['vol']))) * 20)
+            def vol_cutoff_update():
+                pipe.imsegmented.fill(0)
+                pipe.LOW_VOLUME_CUTOFF, pipe.HIGH_VOLUME_CUTOFF = bandpass_vol.value()
+                for region in pipe.regions:
+                    if pipe.LOW_VOLUME_CUTOFF <= region['vol'] <= pipe.HIGH_VOLUME_CUTOFF:
+                        minz, miny, minx, maxz, maxy, maxx = region['bbox']
+                        segmented_cell = region['image'] * pipe.impreprocessed[minz:maxz, miny:maxy, minx:maxx]
+                        segmented_cell = segmented_cell / (segmented_cell.max() - segmented_cell.min())
+                        pipe.imsegmented[minz:maxz, miny:maxy, minx:maxx] += segmented_cell
+                minz, miny, minx, maxz, maxy, maxx = pipe.regions[pipe.n_region]['bbox']
+                viewer.layers['bandpassed'].data = pipe.imsegmented
 
-        def vol_cutoff_update():
-            pipe.imsegmented.fill(0)
-            pipe.LOW_VOLUME_CUTOFF, pipe.HIGH_VOLUME_CUTOFF = bandpass_vol.value()
-            for region in pipe.regions:
-                if pipe.LOW_VOLUME_CUTOFF <= region['vol'] <= pipe.HIGH_VOLUME_CUTOFF:
-                    minz, miny, minx, maxz, maxy, maxx = region['bbox']
-                    segmented_cell = region['image'] * pipe.impreprocessed[minz:maxz, miny:maxy, minx:maxx]
-                    segmented_cell = segmented_cell / (segmented_cell.max() - segmented_cell.min())
-                    pipe.imsegmented[minz:maxz, miny:maxy, minx:maxx] += segmented_cell
-            minz, miny, minx, maxz, maxy, maxx = pipe.regions[pipe.n_region]['bbox']
-            viewer.layers['bandpassed'].data = pipe.imsegmented
+            bandpass_vol.valueChanged.connect(vol_cutoff_update)
+            greatgrandparent.ExportCells.BandpassVolume.bandpass_vol = bandpass_vol
 
-        bandpass_vol.valueChanged.connect(vol_cutoff_update)
-        greatgrandparent.ExportCells.bandpass_vol = bandpass_vol
+            @set_design(min_height=140)
+            class Filter(FreeWidget):
+                def __init__(self):
+                    super().__init__()
+                    self.wdt = bandpass_vol
+                    self.set_widget(self.wdt)
+
+            greatgrandparent.ExportCells.BandpassVolume.append(Filter())
+            greatgrandparent.ExportCells.BandpassVolume.visible = True
+
         viewer.add_image(pipe.imsegmented, colormap='inferno', scale=pipe.SCALE, name='bandpassed')
-        if "Bandpass Volume" not in list(viewer.window._dock_widgets.keys()):
-            viewer.window.add_dock_widget(
-                greatgrandparent.ExportCells.bandpass_vol,
-                name="Bandpass Volume", area="bottom"
-                )
-            viewer.window._dock_widgets["Bandpass Volume"].setFixedHeight(80)
+
         greatgrandparent.current_index = 4
-        vol_cutoff_update()
+        greatgrandparent.ExportCells.BandpassVolume.bandpass_vol.setValue([pipe.LOW_VOLUME_CUTOFF, pipe.HIGH_VOLUME_CUTOFF])
 
 
 def _auto_params_deconv(pipe):
@@ -1181,6 +1183,10 @@ class Autocrop:
             pipe = self.__magicclass_parent__.pipe
             pipe.OUT_DIMS, pipe.SEGMENT_TYPE = self.out_dims.value, self.segment_type.value
             pipe._export()
+        
+        @magicclass(widget_type="groupbox", visible=False)
+        class BandpassVolume:
+            pass
 
     @magicclass(widget_type="scrollable")
     class Analyze:
