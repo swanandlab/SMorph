@@ -621,11 +621,11 @@ class Autocrop:
     class LoadDataset:
         @magicclass(widget_type="groupbox")
         class LoadDIR:
-            IN_DIR = field('Datasets/Confocal/SAL,DMI, FLX ADN HALO_TREATMENT_28 DAYS/SAL_28_DAYS')
-            OUT_DIR = field('Autocropped/')
-            IM_FILTER = field('.+HILUS.+\.czi')
-            IM_ROI_FILTER = field('.+HILUS.+DAY\.roi')
-            ROI_NAME = field('HILUS')
+            IN_DIR = field(str)
+            OUT_DIR = field(str)
+            IM_FILTER = field(str)
+            IM_ROI_FILTER = field(str)
+            ROI_NAME = field(str)
 
             def load_directory(self):
                 files = listdir(self.IN_DIR.value)
@@ -650,12 +650,12 @@ class Autocrop:
 
         @magicclass(widget_type="groupbox")
         class LoadImage:
-            IM_NUM = field(0)
+            IM_NUM = field(int)
             IMAGE = field(str)
             ROI = field(str)
 
-            REF_IMAGE = field('Datasets/Confocal/SAL,DMI, FLX ADN HALO_TREATMENT_28 DAYS/FLX_28_DAYS/FLX_MSP3.1M_2_DOUBLE MARK_20X_SEC 1_RIGHT HILUS_28 DAY.czi')
-            REF_ROI = field('Datasets/Confocal/SAL,DMI, FLX ADN HALO_TREATMENT_28 DAYS/FLX_28_DAYS/FLX_MSP3.1M_2_DOUBLE MARK_20X_SEC 1_RIGHT HILUS_28 DAY.roi')
+            REF_IMAGE = field(str)
+            REF_ROI = field(str)
 
             @IM_NUM.connect
             def _update_file(self):
@@ -699,6 +699,19 @@ class Autocrop:
                     deconv_widget.refr_index.value = params_deconv['refr_index']
                     deconv_widget.pinhole_radius.value = params_deconv['pinhole_radius']
 
+                inparams = dict(
+                    IN_DIR=parent.LoadDIR.IN_DIR.value,
+                    OUT_DIR=parent.LoadDIR.OUT_DIR.value,
+                    IM_FILTER=parent.LoadDIR.IM_FILTER.value,
+                    IM_ROI_FILTER=parent.LoadDIR.IM_ROI_FILTER.value,
+                    ROI_NAME=parent.LoadDIR.ROI_NAME.value,
+                    REF_IMAGE=self.REF_IMAGE.value,
+                    REF_ROI=self.REF_ROI.value,
+                )
+
+                with open('.cache_inparams.json', 'w') as out:
+                    json.dump(inparams, out)
+
     @magicclass(widget_type="scrollable")
     class Preprocess:
         params_preprocess = dict(
@@ -727,9 +740,9 @@ class Autocrop:
 
                 select_roi = not(roi_path in (None, '')) and not(roi_name in (None, ''))
 
-                roi_polygon = (np.array([[0, 0], [impreprocessed.shape[0]-1, 0],
-                                        [impreprocessed.shape[0]-1, impreprocessed.shape[1]-1],
-                                        [0, impreprocessed.shape[1]-1]])
+                roi_polygon = (np.array([[0, 0], [impreprocessed.shape[-2]-1, 0],
+                                        [impreprocessed.shape[-2]-1, impreprocessed.shape[-1]-1],
+                                        [0, impreprocessed.shape[-1]-1]])
                             if not select_roi else
                             select_ROI(impreprocessed, roi_name, roi_path)
                     )
@@ -904,7 +917,7 @@ class Autocrop:
                     params_filter = dict(
                         size=self.size.value
                     )
-                    filtered = ndi.median_filter(pipe.impreprocessed, **params_filter)
+                    filtered = ndi.uniform_filter(pipe.impreprocessed, **params_filter)
                     cmap = self.parent_viewer.layers['impreprocessed'].colormap.name
                     self.parent_viewer.add_image(filtered, scale=pipe.SCALE, colormap=cmap)
                     self.__magicclass_parent__.params_preprocess['filter'] = params_filter
