@@ -647,6 +647,7 @@ class TissueImage:
     def __init__(
         self,
         im_path,
+        channel=0,
         roi_path=None,
         roi_name=None,
         ref_im_path=None,
@@ -660,7 +661,7 @@ class TissueImage:
             raise ValueError('Load ROI properly')
         self.im_path = im_path
         self.REF_IM_PATH = ref_im_path
-        imoriginal, SCALE, metadata = imread(im_path, ref_im_path)
+        imoriginal, SCALE, metadata = imread(im_path, ref_im_path, channel)
         self.imoriginal, self.SCALE = imoriginal, SCALE
         self.impreprocessed = imoriginal
         self.metadata = metadata

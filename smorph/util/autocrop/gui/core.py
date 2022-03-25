@@ -653,6 +653,7 @@ class Autocrop:
             IM_NUM = field(int)
             IMAGE = field(str)
             ROI = field(str)
+            channel = field(int)
 
             REF_IMAGE = field(str)
             REF_ROI = field(str)
@@ -675,6 +676,7 @@ class Autocrop:
 
                 grandparent.pipe = pipe = core.TissueImage(
                     path.join(grandparent.IN_DIR, self.IMAGE.value),
+                    channel=self.channel.value,
                     roi_path=path.join(grandparent.IN_DIR, self.ROI.value),
                     roi_name=grandparent.ROI_NAME,
                     ref_im_path=self.REF_IMAGE.value,
