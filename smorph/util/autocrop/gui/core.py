@@ -771,16 +771,15 @@ class Autocrop:
                 imoriginal = pipe.imoriginal
                 impreprocessed = pipe.impreprocessed
 
-                mask, bounds = mask_ROI(imoriginal, roi_polygon)
+                mask, bounds = mask_ROI(impreprocessed, roi_polygon)
 
                 miny, maxy, minx, maxx = get_maximal_rectangle(mask)
                 pipe.in_box = (miny, minx, maxy, maxx)
 
-                imoriginal *= np.broadcast_to(mask, imoriginal.shape)
-                imoriginal = imoriginal[bounds]  # reduce non-empty
+                imoriginal = imoriginal[bounds]
 
                 impreprocessed *= np.broadcast_to(mask, impreprocessed.shape)
-                impreprocessed = impreprocessed[bounds]
+                impreprocessed = impreprocessed[bounds]  # reduce non-empty
 
                 pipe.impreprocessed = impreprocessed
                 pipe.imoriginal = imoriginal
@@ -932,7 +931,7 @@ class Autocrop:
                     params_filter = dict(
                         size=self.size.value
                     )
-                    filtered = ndi.uniform_filter(pipe.impreprocessed, **params_filter)
+                    filtered = ndi.median_filter(pipe.impreprocessed, **params_filter)
                     cmap = self.parent_viewer.layers['impreprocessed'].colormap.name
                     self.parent_viewer.add_image(filtered, scale=pipe.SCALE, colormap=cmap)
                     self.__magicclass_parent__.params_preprocess['filter'] = params_filter
@@ -1060,8 +1059,7 @@ class Autocrop:
             miny, maxy, minx, maxx = get_maximal_rectangle(mask)
             pipe.in_box = (miny, minx, maxy, maxx)
 
-            imoriginal *= np.broadcast_to(mask, imoriginal.shape)
-            imoriginal = imoriginal[bounds]  # reduce non-empty
+            imoriginal = imoriginal[bounds]
 
             pipe.imoriginal = imoriginal
             pipe.impreprocessed = np.asarray(da.from_zarr(cache_path))
@@ -1115,6 +1113,7 @@ class Autocrop:
                 self.parent_viewer.layers.clear()
                 # print(self.low_thresh.value, self.high_thresh.value, self.low_auto_thresh.value, self.high_auto_thresh.value)
                 pipe.segment(self.low_thresh.value, self.high_thresh.value, self.low_auto_thresh.value, self.high_auto_thresh.value)
+                self.parent_viewer.add_image(pipe.imoriginal, scale=pipe.SCALE, colormap='inferno', name='imoriginal')
                 self.parent_viewer.add_image(pipe.impreprocessed, scale=pipe.SCALE, colormap='inferno', name='unsegmented')
                 self.parent_viewer.add_image(pipe.imsegmented, scale=pipe.SCALE, colormap='inferno', name='segmented')
                 self.parent_viewer.add_labels(pipe.labels, scale=pipe.SCALE, name='labels',
