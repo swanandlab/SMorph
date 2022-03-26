@@ -43,8 +43,7 @@ def _extract_cell_features(cell, shell_step_size, polynomial_degree):
     surface_area = get_surface_area(cleaned_image, cell.scale)
 
     cell_skeleton = skeletonize(cleaned_image)
-    cell._skeleton = Skeleton(cell_skeleton, spacing=cell.scale,
-                              unique_junctions=True)
+    cell._skeleton = Skeleton(cell_skeleton, spacing=cell.scale)
     cell.skeleton = cell._skeleton.skeleton_image
 
     # Skeletal features
@@ -65,7 +64,7 @@ def _extract_cell_features(cell, shell_step_size, polynomial_degree):
     (
         branching_structure,
         terminal_branches
-    ) = classify_branching_structure(cell, soma_on_skeleton)
+    ) = classify_branching_structure(cell._skeleton, soma_on_skeleton)
 
     cell.skel_soma = soma_on_skeleton
     cell._padded_skeleton = padded_skeleton
