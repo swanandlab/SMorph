@@ -714,6 +714,19 @@ class Autocrop:
                 with open('.cache_inparams.json', 'w') as out:
                     json.dump(inparams, out)
 
+        def load_cache(self):
+            fname = '.cache_inparams.json'
+            if path.isfile(fname):
+                f = open(fname)
+                inparams = json.loads(f.read())
+                self.LoadDIR.IN_DIR.value = inparams["IN_DIR"]
+                self.LoadDIR.OUT_DIR.value = inparams["OUT_DIR"]
+                self.LoadDIR.IM_FILTER.value = inparams["IM_FILTER"]
+                self.LoadDIR.IM_ROI_FILTER.value = inparams["IM_ROI_FILTER"]
+                self.LoadDIR.ROI_NAME.value = inparams["ROI_NAME"]
+                self.LoadImage.REF_IMAGE.value = inparams["REF_IMAGE"]
+                self.LoadImage.REF_ROI.value = inparams["REF_ROI"]
+
     @magicclass(widget_type="scrollable")
     class Preprocess:
         params_preprocess = dict(
@@ -1061,9 +1074,9 @@ class Autocrop:
         @magicclass(widget_type="none")
         class Threshold:
             low_auto_thresh = ComboBox(choices=[None, *THRESHOLD_METHODS])
-            low_thresh = FloatSlider(value=.07, max=1)
+            low_thresh = FloatSlider(value=.2, max=1)
             high_auto_thresh = ComboBox(choices=[None, *THRESHOLD_METHODS])
-            high_thresh = FloatSlider(value=.1, max=1)
+            high_thresh = FloatSlider(value=.4, max=1)
             low_delta = FloatSlider(max=1)
             high_delta = FloatSlider(max=1)
             n_steps = field(0)
@@ -1205,8 +1218,8 @@ class Autocrop:
 
     @magicclass(widget_type="scrollable")
     class Analyze:
-        group_dir = field('Autocropped/CONTROL_MSP2.1MB_4_LONG MARK_20X_SEC 1_LEFT HILUS_28 DAY-HILUS/segmented_3d')
-        LABELS = field('sal')
+        group_dir = field(str)
+        LABELS = field(str)
         IMG_TYPE = field(str, widget_type="ComboBox", options=dict(choices=['confocal', 'DAB']))
         SEGMENTED = field(True)
         SHOLL_STEP_SIZE = field(3)
