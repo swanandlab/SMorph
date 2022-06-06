@@ -16,7 +16,7 @@ from skimage.filters import (
 )
 from skimage.measure import label
 from skimage.morphology import closing, square
-from skimage.transform import match_histograms  # TODO:0.18 moved to exposure
+from skimage.exposure import match_histograms  # skimage >= 0.18
 from skimage.util import invert
 
 THRESHOLD_METHODS = ('isodata', 'li', 'mean', 'minimum',
