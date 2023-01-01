@@ -1,5 +1,6 @@
 from errno import ENOENT
-from os import getcwd, listdir, mkdir, path, remove
+from os import getcwd, listdir, mkdir, path, remove, makedirs
+from shutil import rmtree
 
 import skimage.io as io
 
@@ -16,6 +17,12 @@ def mkdir_if_not(name):
     """Collision-free mkdir"""
     if not (path.exists(name) and path.isdir(name)):
         mkdir(name)
+
+def mkdir_override(name):
+    """Annhilating mkdir"""
+    if path.exists(name) and path.isdir(name):
+        rmtree(name)
+    makedirs(name)
 
 
 def _load_group(group, file_names, group_data):

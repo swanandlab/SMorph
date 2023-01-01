@@ -1,4 +1,5 @@
 import json
+import sys
 from itertools import cycle
 from os import getcwd, mkdir, path
 from shutil import rmtree
@@ -32,6 +33,7 @@ from ..util._io import (
     read_group_dirs,
     silent_remove_file,
     mkdir_if_not,
+    mkdir_override,
     savefig
 )
 from .api import Cell
@@ -140,8 +142,8 @@ def _analyze_cells(groups):
     N_GROUPS = len(group_dirs)
 
     silent_remove_file(SKIPPED_CELLS_FILENAME)
-    # PROCESSED_DIR = 'Results/processed/'
-    # mkdir(PROCESSED_DIR)
+    PROCESSED_DIR = path.join(groups.out_dir, 'processed/')
+    mkdir_override(PROCESSED_DIR)
     all_features = []
     all_sholl = []
     def myconverter(obj):
@@ -159,11 +161,11 @@ def _analyze_cells(groups):
 
             cell_cnt += 1
             try:
-                metadata = tifffile.TiffFile(file_names[cell_cnt-1]).pages[
-                                0].tags['ImageDescription'].value
-                metadata = json.loads(metadata)
-                mscale = metadata['scale'][-cell_image.ndim:]
-                # mscale = scale
+                # metadata = tifffile.TiffFile(file_names[cell_cnt-1]).pages[
+                #                 0].tags['ImageDescription'].value
+                # metadata = json.loads(metadata)
+                #mscale = metadata['scale'][-cell_image.ndim:]
+                mscale = scale
                 cell = Cell(cell_image, img_type, mscale,
                             segmented=segmented,
                             contrast_ptiles=contrast_ptiles,
@@ -172,15 +174,15 @@ def _analyze_cells(groups):
                             polynomial_degree=poly_degree)
                 cell_features = list(cell.features.values())
                 # to output intermediate cell processing steps
-                # tifffile.imsave(PROCESSED_DIR + file_names[cell_cnt].split('/')[-1], skimage.img_as_ubyte(cell.image))
-                # bin = cell.cleaned_image
-                # bin[bin == True] = 255
-                # bin[bin == False] = 0
-                # tifffile.imsave(PROCESSED_DIR + file_names[cell_cnt].split('/')[-1].replace('.tif', '_bin.tif'), skimage.img_as_ubyte(bin))
-                # tifffile.imsave(PROCESSED_DIR + file_names[cell_cnt].split('/')[-1].replace('.tif', '_sk.tif'), cell.skeleton)
-                # plt.imshow(cell.image, cmap='gray'), plt.imshow(cell.skeleton, alpha = .4)
-                # plt.axis('off')
-                # plt.savefig(PROCESSED_DIR + file_names[cell_cnt].split('/')[-1].replace('.tif', '_sovr.tif'), bbox_inches='tight', pad_inches=0)
+                if 'save_cell' in groups.args and groups.args['save_cell']:
+                    tifffile.imsave(PROCESSED_DIR + file_names[cell_cnt].split('/')[-1], skimage.img_as_ubyte(cell.image))
+                if 'save_bin' in groups.args and groups.args['save_bin']:
+                    bin = cell.cleaned_image
+                    bin[bin == True] = 255
+                    bin[bin == False] = 0
+                    tifffile.imsave(PROCESSED_DIR + file_names[cell_cnt].split('/')[-1].replace('.tif', '_bin.tif'), skimage.img_as_ubyte(bin))
+                if 'save_skel' in groups.args and groups.args['save_skel']:
+                    tifffile.imsave(PROCESSED_DIR + file_names[cell_cnt].split('/')[-1].replace('.tif', '_sk.tif'), cell.skeleton)
 
                 for feature in cell_features:
                     if feature is None:
@@ -213,7 +215,7 @@ def _analyze_cells(groups):
                         '.'.join(file_names[
                             cell_cnt-1].split('/')[-1].split('.')[:-1])
                     )
-                    if cell.image.ndim == 2:
+                    if cell.image.ndim == 2 and 'save_overlay' in groups.args and groups.args['save_overlay']:
                         fig, ax = plt.subplots(figsize=(8, 8))
                         ax.imshow(cell.image, cmap='gray')
 
@@ -221,27 +223,28 @@ def _analyze_cells(groups):
                             cell.skeleton) if val != 0])
                         ax.plot(idx[:,1], idx[:,0], 'y.', alpha=.5)
 
-                        colors = ['red', 'blue', 'magenta', 'green', 'cyan']
+                        if 'save_branch_struct' in groups.args and groups.args['save_branch_struct']:
+                            colors = ['red', 'blue', 'magenta', 'green', 'cyan']
 
-                        branching_structure = cell._branching_struct
-                        coords = cell._branch_coords
-                        # store same level branch nodes in single array
-                        color_branches_coords = []
-                        for branch_level in branching_structure:
-                            single_branch_level = []
-                            for brpath in branch_level:
-                                path_coords = []
-                                for node in brpath:
-                                    path_coords.append(coords[node])
-                                    single_branch_level.extend(path_coords)
-                            color_branches_coords.append(single_branch_level)
+                            branching_structure = cell._branching_struct
+                            coords = cell._skeleton.coordinates
+                            # store same level branch nodes in single array
+                            color_branches_coords = []
+                            for branch_level in branching_structure:
+                                single_branch_level = []
+                                for brpath in branch_level:
+                                    path_coords = []
+                                    for node in brpath:
+                                        path_coords.append(coords[node])
+                                        single_branch_level.extend(path_coords)
+                                color_branches_coords.append(single_branch_level)
 
-                        for j, color_branch in enumerate(color_branches_coords):
-                            if j > 4:
-                                j = 4
-                            for k in color_branch:
-                                c = plt.Circle((k[1], k[0]), 0.5, color=colors[j])
-                                ax.add_patch(c)
+                            for j, color_branch in enumerate(color_branches_coords):
+                                if j > 4:
+                                    j = 4
+                                for k in color_branch:
+                                    c = plt.Circle((k[1], k[0]), 0.5, color=colors[j])
+                                    ax.add_patch(c)
 
                         # draw.overlay_skeleton_networkx(
                         #     cell._skeleton.graph, cell._skeleton.coordinates, axis=ax)
@@ -257,8 +260,9 @@ def _analyze_cells(groups):
                         for c in circles:
                             ax.add_patch(c)
                         ax.axis("off")
-                        fig.savefig(f'{im_name}.png')
+                        fig.savefig(f'{PROCESSED_DIR + path.split(file_names[cell_cnt-1])[-1]}_overlay.png')
                         plt.close(fig)
+                        plt.close()
 
                 all_features.append(cell.features)
                 radius = cell.sholl_step_size
@@ -275,6 +279,9 @@ def _analyze_cells(groups):
                       f'"{file_names[cell_cnt - 1]}" due to {err}.')
                 with open(SKIPPED_CELLS_FILENAME, 'a') as skip_file:
                     skip_file.write(file_names[cell_cnt - 1] + '\n')
+                exc_type, exc_obj, exc_tb = sys.exc_info()
+                fname = path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+                print(exc_type, fname, exc_tb.tb_lineno)
 
         group_cnts.append(group_cell_cnt)
         tmp_fnames = [cell_name for idx, cell_name in enumerate(file_names)
@@ -403,7 +410,7 @@ class Groups:
     __slots__ = ('group_dirs', 'image_type', 'segmented', "contrast_ptiles",
                  "threshold_method", "sholl_step_size", "polynomial_degree",
                  "scale", "show_logs", "out_dir", "fig_format",
-                 "bad_cell_indices",
+                 "bad_cell_indices", "args",
                  'features', 'targets', 'sholl_original_plots', 'labels',
                  'sholl_polynomial_plots', 'pca_feature_names', 'markers',
                  'feature_significance', 'file_names', 'group_counts',
@@ -423,7 +430,8 @@ class Groups:
         save_results=True,
         show_logs=False,
         out_dir="Results/",
-        fig_format='png'
+        fig_format='png',
+        args={}
     ):
         self.group_dirs = group_dirs
         self.image_type = image_type
@@ -440,7 +448,9 @@ class Groups:
                             else [path.basename(f) for f in group_dirs]))
         self.sholl_step_size = sholl_step_size
         self.save = save_results
-        self.out_dir = out_dir
+        self.out_dir = path.join(out_dir, "_vs_".join(self.labels))
+        mkdir_override(self.out_dir)
+        self.args = args
 
         (
             self.features,
@@ -565,12 +575,12 @@ class Groups:
 
         if save_results or self.save:
             # single_cell_intersections
-            DIR, OUTFILE = '/Results/', 'sholl_intersections.csv'
-            df_to_csv(write_buffer, DIR, OUTFILE)
-            df_to_csv(jasp_friendly, DIR, 'sholl_intersections_jasp.csv')
+            OUTFILE = 'sholl_intersections.csv'
+            df_to_csv(write_buffer, self.out_dir, OUTFILE)
+            df_to_csv(jasp_friendly, self.out_dir, 'sholl_intersections_jasp.csv')
 
             OUTPLOT = f'avg_sholl_plot.{self.fig_format}'
-            savefig(fig, DIR + OUTPLOT)
+            savefig(fig, path.join(self.out_dir, OUTPLOT))
         
         y_height = plt.gca().get_ylim()[-1]
 
@@ -608,7 +618,7 @@ class Groups:
             ax.yaxis.label.set_ha('right')
 
         if self.save:
-            savefig(plt, f'/Results/feature_scatter_matrix.{self.fig_format}')
+            savefig(plt, path.join(self.out_dir, f'feature_scatter_matrix.{self.fig_format}'))
 
         plt.show()
 
@@ -768,13 +778,12 @@ class Groups:
         visualize_two_PCs()
 
         if save_results or self.save:
-            DIR = '/Results/'
             PC_COLUMN_NAMES = [f'PC {itr + 1}' for itr in range(n_PC)]
             pca_values = DataFrame(data=projected, columns=PC_COLUMN_NAMES)
-            df_to_csv(pca_values, DIR, 'pca_values.csv')
+            df_to_csv(pca_values, self.out_dir, 'pca_values.csv')
 
-            savefig(scree_plots, f'{DIR}scree_plots.{self.fig_format}')
-            savefig(two_PCs_plot, f'{DIR}two_PCs_plot.{self.fig_format}')
+            savefig(scree_plots, path.join(self.out_dir, f'scree_plots.{self.fig_format}'))
+            savefig(two_PCs_plot, path.join(self.out_dir, f'two_PCs_plot.{self.fig_format}'))
 
         self.feature_significance = feature_significance
         self.projected = projected
@@ -877,7 +886,7 @@ class Groups:
         plt.tight_layout()
 
         if self.save:
-            savefig(plt, f'/Results/feature_bar_swarm.{self.fig_format}')
+            savefig(plt, path.join(self.out_dir, f'feature_bar_swarm.{self.fig_format}'))
 
         plt.show()
 
@@ -926,7 +935,7 @@ class Groups:
         plt.tight_layout()
 
         if self.save:
-            savefig(plt, f'/Results/feature_histograms.{self.fig_format}')
+            savefig(plt, path.join(self.out_dir, f'feature_histograms.{self.fig_format}'))
 
         plt.show()
 
@@ -970,7 +979,7 @@ class Groups:
         plt.tight_layout()
 
         if self.save:
-            savefig(plt, f'/Results/feature_significance_heatmap.{self.fig_format}')
+            savefig(plt, path.join(self.out_dir, f'feature_significance_heatmap.{self.fig_format}'))
 
         plt.show()
 
@@ -1008,7 +1017,7 @@ class Groups:
         ax.set_ylabel('PC 2')
 
         if self.save:
-            savefig(plt, f'/Results/feature_significance_vectors.{self.fig_format}')
+            savefig(plt, path.join(self.out_dir, f'feature_significance_vectors.{self.fig_format}'))
 
         plt.show()
 
@@ -1270,11 +1279,10 @@ class Groups:
         out[df.columns] = df
 
         if save_results or self.save:
-            DIR = '/Results/'
-            df_to_csv(out, DIR, 'clustered_cells.csv')
-            df_to_csv(dist, DIR, 'cluster_distribution.csv')
+            df_to_csv(out, self.out_dir, 'clustered_cells.csv')
+            df_to_csv(dist, self.out_dir, 'cluster_distribution.csv')
             if cluster_plot is not None:
-                savefig(cluster_plot, f'{DIR}cluster_plot.{self.fig_format}')
+                savefig(cluster_plot, path.join(self.out_dir, f'cluster_plot.{self.fig_format}'))
 
         if label_metadata:
             for _, row in out.iterrows():
@@ -1293,7 +1301,7 @@ class Groups:
                                         description=out_metadata)
 
         if export_clustered_cells:
-            DIR = path.join(getcwd(), '/Results/clustered_cells/')
+            DIR = path.join(self.out_dir, 'clustered_cells/')
             if path.exists(DIR) and path.isdir(DIR):
                 rmtree(DIR)
             mkdir(DIR)
@@ -1324,7 +1332,7 @@ class Groups:
         if save_results:
             out = DataFrame(self.file_names, columns=['file_name'])
             out[df.columns] = df
-            df_to_csv(out, '/Results/', 'clustered_cells.csv')
+            df_to_csv(out, self.out_dir, 'clustered_cells.csv')
 
         return centers_df, df, dist
 
@@ -1436,7 +1444,7 @@ class Groups:
         visualize_two_components()
 
         if self.save and lda_plot is not None:
-            savefig(lda_plot, f'/Results/lda_plot.{self.fig_format}')
+            savefig(lda_plot, path.join(self.out_dir, f'lda_plot.{self.fig_format}'))
 
         # self.feature_significance = feature_significance
         # self.projected = projected

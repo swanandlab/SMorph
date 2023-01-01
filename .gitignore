@@ -57,6 +57,7 @@ doc/_build/
 
 # Development
 poetry.lock
+.venv/
 
 # Analysis results
 Datasets/
