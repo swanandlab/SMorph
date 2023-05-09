@@ -13,13 +13,15 @@ scipy = "1.6.0"
 networkx = "^2.6.3"
 numba = "0.51.2"
 matplotlib = "^3.5.1"
-seaborn = "0.8.1"
+seaborn = "0.11"
 pandas = "1.1.2"
 scikit-image = "^0.19.1"
 scikit-learn = "^1.0.2"
 argon2-cffi = "20.1.0"
 jupyter = "^1.0.0"
 ipyvolume = "^0.5.2"
+urllib3 = "1.26.15"
+statannotations = "^0.5.0"
 
 [tool.poetry.dev-dependencies]
 
