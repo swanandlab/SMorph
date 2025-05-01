@@ -16,6 +16,7 @@ from .core import _unwrap_polygon
 
 def _segment_clump(image, markers):
     mask = image > 0
+    markers = markers.astype(int)
     labels = watershed(-image, markers, mask=mask, watershed_line=True)
     return labels
 

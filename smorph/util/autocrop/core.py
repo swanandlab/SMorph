@@ -355,7 +355,7 @@ def _simplify_graph(skel):
         # don't reduce
         return skel.graph, np.arange(skel.graph.shape[0])
 
-    summary = summarize(skel)
+    summary = summarize(skel, separator='-')
     src = np.asarray(summary['node-id-src'])
     dst = np.asarray(summary['node-id-dst'])
     distance = np.asarray(summary['branch-distance'])
@@ -1210,7 +1210,7 @@ class TissueImage:
                     somas_coords -= ll
                     im = self.impreprocessed[minz:maxz, miny:maxy, minx:maxx].copy()
                     im[~region['image']] = 0
-                    markers = np.zeros(region['image'].shape)
+                    markers = np.zeros(region['image'].shape, dtype=int)
 
                     somas_coords = np.array([x for x in somas_coords if region['image'][tuple(x)] > 0])
 
@@ -1419,7 +1419,7 @@ class TissueImage:
             somas_coords = viewer.layers[layer_names.index('filtered_coords')].data.astype(int)
             im = denoised[minz:maxz, miny:maxy, minx:maxx].copy()
             im[~region['image']] = 0
-            markers = np.zeros(region['image'].shape)
+            markers = np.zeros(region['image'].shape, dtype=int)
 
             for i in range(somas_coords.shape[0]):
                 markers[tuple(somas_coords[i])] = i + 1
@@ -1454,7 +1454,7 @@ class TissueImage:
                     somas_coords -= ll
                     im = self.impreprocessed[minz:maxz, miny:maxy, minx:maxx].copy()
                     im[~region['image']] = 0
-                    markers = np.zeros(region['image'].shape)
+                    markers = np.zeros(region['image'].shape, dtype=int)
 
                     somas_coords = np.array([x for x in somas_coords if region['image'][tuple(x)] > 0])
 

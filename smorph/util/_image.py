@@ -42,7 +42,7 @@ def _validate_img_args(segmented, contrast_ptiles, threshold_method):
 
     if (
         (threshold_method not in THRESHOLD_METHODS)
-        and not isinstance(threshold_method, (int, float, np.float))
+        and not isinstance(threshold_method, (int, float))
     ):
         raise ValueError('`threshold_method` must be either of otsu, '
                          'isodata, li, mean, minimum, triangle, or yen')
@@ -144,7 +144,7 @@ def preprocess_image(
 
     # Intensity normalization
     min_intensity, max_intensity = image.min(), image.max()
-    image = image.astype(np.float)
+    image = image.astype(float)
     image = (image - min_intensity) / (max_intensity - min_intensity)
 
     thresholded_image = _threshold_image(image, image_type, reference_image,
@@ -182,7 +182,7 @@ def _threshold_image(
                          'mean': threshold_mean, 'minimum': threshold_minimum,
                          'triangle': threshold_triangle}
 
-    if isinstance(method, (int, float, np.float)):
+    if isinstance(method, (int, float)):
         thresholded_cell = image > method
     else:
         thresholded_cell = img_rescale > THRESHOLD_METHODS[method](img_rescale)

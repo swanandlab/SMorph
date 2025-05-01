@@ -1,6 +1,8 @@
-import winsound
 import json
 import re
+import sys
+import platform
+import os
 from itertools import repeat
 from os import (
     getcwd,
@@ -103,6 +105,15 @@ def longest_contiguous_nonzero(vals):
     return best, start_best, end_best
 
 
+def beep():
+    if platform.system() == "Windows":
+        import winsound
+        winsound.MessageBeep()
+    else:
+        os.system('printf "\\a"')
+        sys.stdout.flush()
+
+
 @magicclass(widget_type="groupbox")
 class HighPassVolume:
     cutoff=Slider(max=0)
@@ -145,7 +156,7 @@ class HighPassVolume:
         somas_estimates = core.approximate_somas(pipe.imsegmented, pipe.regions)
         pipe.FINAL_PT_ESTIMATES = pipe.somas_estimates = somas_estimates
         pt_layer = self.parent_viewer.add_points(somas_estimates, face_color='red',
-            edge_width=0, blending='translucent',
+            border_width=0, blending='translucent',
             opacity=.6, size=5, name='somas_coords', scale=pipe.SCALE
             )
         ray_layer = self.parent_viewer.add_points(
@@ -516,7 +527,7 @@ class InteractiveSegmentation:
         pipe.imsegmented = pipe.impreprocessed * bin_refined
 
         # After all changes (for reproducibility)
-        label_diff = (pipe.imbinary).astype(np.int) - bin_refined.astype(np.int)
+        label_diff = (pipe.imbinary).astype(int) - bin_refined.astype(int)
         pipe.label_diff = label_diff
         final_soma = np.unique(pipe.FINAL_PT_ESTIMATES, axis=0)
         pipe.FINAL_PT_ESTIMATES = final_soma
@@ -577,8 +588,8 @@ class InteractiveSegmentation:
 
 
 def _auto_params_deconv(pipe):
-    impath = pipe.im_path.lower()
-    if impath.split('.')[-1] == 'czi':
+    impath = pipe.im_path
+    if impath.lower().split('.')[-1] == 'czi':
         czimeta = czifile.CziFile(impath).metadata(False)
         metadata = czimeta['ImageDocument']['Metadata']
         im_meta = metadata['Information']['Image']
@@ -683,7 +694,7 @@ class Autocrop:
                     ref_roi_path=self.REF_ROI.value,
                     out_dir=grandparent.OUT_DIR
                     )
-                winsound.MessageBeep(0)
+                beep()
 
                 self.parent_viewer.layers.clear()
                 self.parent_viewer.add_image(pipe.imoriginal, scale=pipe.SCALE, colormap='inferno', name='imoriginal')
@@ -1118,8 +1129,8 @@ class Autocrop:
                 self.parent_viewer.add_image(pipe.imsegmented, scale=pipe.SCALE, colormap='inferno', name='segmented')
                 self.parent_viewer.add_labels(pipe.labels, scale=pipe.SCALE, name='labels',
                     rendering='translucent',
-                    color=_get_ncolors_map(len(pipe.regions)+1, cmap_name='plasma_r')
-                    )
+                    colormap=_get_ncolors_map(len(pipe.regions)+1, cmap_name='plasma_r')
+                )
 
                 parent = self.__magicclass_parent__
                 try:
