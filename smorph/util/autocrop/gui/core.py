@@ -1308,10 +1308,12 @@ class Autocrop:
             for group_no, group_cnt in enumerate(group_cnts):
                 lft_idx += group_cnt
 
-                sns.lineplot(jasp_friendly[jasp_friendly["label"] == labels[group_no]]["radius"],
-                    jasp_friendly[jasp_friendly["label"] == labels[group_no]]["nintersections"],
-                    ci=68, label=labels[group_no], ax=parent.Visualize.fig.ax
-                    )
+                sns.lineplot(
+                    x=jasp_friendly[jasp_friendly["label"] == labels[group_no]]["radius"],
+                    y=jasp_friendly[jasp_friendly["label"] == labels[group_no]]["nintersections"],
+                    ci=68, label=labels[group_no],
+                    ax=parent.Visualize.fig.ax
+                )
 
             parent.Visualize.fig.xlabel("Distance from soma")
             parent.Visualize.fig.ylabel("No. of intersections")

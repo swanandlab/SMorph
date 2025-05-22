@@ -44,7 +44,7 @@ def etree_to_dict(t):
 
 def _import_image(im_path, channel_interest):
     # image has to be converted to float for processing
-    if im_path.split('.')[-1] in ('czi', 'lif', 'ims', 'lsm', 'tiff'):
+    if im_path.split('.')[-1] in ('czi', 'lif', 'ims', 'lsm', 'tiff', 'nd2'):
         imfile = AICSImage(im_path)
         imfile.set_scene(0)
         im = imfile.get_image_data("ZYX", T=0, C=channel_interest)
