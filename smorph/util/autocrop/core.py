@@ -2,6 +2,7 @@ import json
 from os import (
     getcwd,
     listdir,
+    makedirs,
     path,
 )
 import json
@@ -75,7 +76,6 @@ from vispy.geometry.rect import Rect
 
 from ._io import (
     _build_multipoint_roi,
-    _mkdir_if_not,
     imread,
     export_cells,
 )
@@ -680,8 +680,8 @@ class TissueImage:
         OUT_DIR = path.join(DIR, only_name(self.im_path) + \
                 f'{"" if self.ROI_NAME == "" else "-" + str(self.ROI_NAME)}/')
         self.OUT_DIR = OUT_DIR
-        _mkdir_if_not(OUT_DIR)
-        _mkdir_if_not(path.join(OUT_DIR, '.cache'))
+        makedirs(OUT_DIR, exist_ok=True)
+        makedirs(path.join(OUT_DIR, '.cache'), exist_ok=True)
 
     def _suppl(self):
         cached_filename = only_name(im_path) + '.zarr'
@@ -1532,28 +1532,28 @@ class TissueImage:
                             '`unsegmented`, `both`')
 
         DIR = getcwd() + '/Autocropped/'
-        _mkdir_if_not(DIR)
+        makedirs(DIR, exist_ok=True)
 
         IMAGE_NAME = '.'.join(path.basename(img_path).split('.')[:-1])
         OUT_DIR = self.OUT_DIR
 
-        _mkdir_if_not(OUT_DIR)
+        makedirs(OUT_DIR, exist_ok=True)
 
         if out_type == OUT_TYPES[2]:
             if seg_type == SEG_TYPES[2]:
-                _mkdir_if_not(path.join(OUT_DIR, SEG_TYPES[0] + '_' + OUT_TYPES[0]))
-                _mkdir_if_not(path.join(OUT_DIR, SEG_TYPES[0] + '_' + OUT_TYPES[1]))
-                _mkdir_if_not(path.join(OUT_DIR, SEG_TYPES[1] + '_' + OUT_TYPES[0]))
-                _mkdir_if_not(path.join(OUT_DIR, SEG_TYPES[1] + '_' + OUT_TYPES[1]))
+                makedirs(path.join(OUT_DIR, SEG_TYPES[0] + '_' + OUT_TYPES[0]), exist_ok=True)
+                makedirs(path.join(OUT_DIR, SEG_TYPES[0] + '_' + OUT_TYPES[1]), exist_ok=True)
+                makedirs(path.join(OUT_DIR, SEG_TYPES[1] + '_' + OUT_TYPES[0]), exist_ok=True)
+                makedirs(path.join(OUT_DIR, SEG_TYPES[1] + '_' + OUT_TYPES[1]), exist_ok=True)
             else:
-                _mkdir_if_not(path.join(OUT_DIR, seg_type + '_' + OUT_TYPES[0]))
-                _mkdir_if_not(path.join(OUT_DIR, seg_type + '_' + OUT_TYPES[1]))
+                makedirs(path.join(OUT_DIR, seg_type + '_' + OUT_TYPES[0]), exist_ok=True)
+                makedirs(path.join(OUT_DIR, seg_type + '_' + OUT_TYPES[1]), exist_ok=True)
         else:
             if seg_type == SEG_TYPES[2]:
-                _mkdir_if_not(path.join(OUT_DIR, SEG_TYPES[0] + '_' + out_type))
-                _mkdir_if_not(path.join(OUT_DIR, SEG_TYPES[1] + '_' + out_type))
+                makedirs(path.join(OUT_DIR, SEG_TYPES[0] + '_' + out_type), exist_ok=True)
+                makedirs(path.join(OUT_DIR, SEG_TYPES[1] + '_' + out_type), exist_ok=True)
             else:
-                _mkdir_if_not(path.join(OUT_DIR, seg_type + '_' + out_type))
+                makedirs(path.join(OUT_DIR, seg_type + '_' + out_type), exist_ok=True)
 
         cell_metadata = {}
 
@@ -1687,7 +1687,7 @@ class TissueImage:
 
         if residue_regions is not None:
             RES_DIR = path.join(OUT_DIR, 'residue')
-            _mkdir_if_not(RES_DIR)
+            makedirs(RES_DIR, exist_ok=True)
             for (obj, region) in enumerate(residue_regions):
                 if low_vol_cutoff <= region['vol']:  # for postprocessing
                     minz, miny, minx, maxz, maxy, maxx = region['bbox']

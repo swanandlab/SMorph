@@ -1,7 +1,7 @@
 import json
 import uuid
 from collections import defaultdict
-from os import getcwd, mkdir, path
+from os import getcwd, makedirs, path
 from pathlib2 import Path
 from shutil import rmtree
 from xml.etree import ElementTree
@@ -101,12 +101,6 @@ def imread(im_path, ref_path=None, channel_interest=0):
     return im, scale, metadata
 
 
-def _mkdir_if_not(name):
-    """Collision-free mkdir"""
-    if not (path.exists(name) and path.isdir(name)):
-        mkdir(name)
-
-
 def _build_multipoint_roi(markers):
     xy, z = markers[:, [2, 1]], markers[:, 0] + 1
     left, top = xy.min(axis=0)
@@ -181,7 +175,7 @@ def export_cells(
                          '`unsegmented`, `both`')
 
     DIR = path.join(getcwd(), '/Autocropped/')
-    _mkdir_if_not(DIR)
+    makedirs(DIR, exist_ok=True)
 
     IMAGE_NAME = '.'.join(path.basename(img_path).split('.')[:-1])
     OUT_DIR = path.join(DIR, IMAGE_NAME + \
@@ -189,23 +183,23 @@ def export_cells(
     # if path.exists(OUT_DIR) and path.isdir(OUT_DIR):  # mandatory new dir
     #     rmtree(OUT_DIR)
     # mkdir(OUT_DIR)
-    _mkdir_if_not(OUT_DIR)
+    makedirs(OUT_DIR, exist_ok=True)
 
     if out_type == OUT_TYPES[2]:
         if seg_type == SEG_TYPES[2]:
-            _mkdir_if_not(path.join(OUT_DIR, SEG_TYPES[0] + '_' + OUT_TYPES[0]))
-            _mkdir_if_not(path.join(OUT_DIR, SEG_TYPES[0] + '_' + OUT_TYPES[1]))
-            _mkdir_if_not(path.join(OUT_DIR, SEG_TYPES[1] + '_' + OUT_TYPES[0]))
-            _mkdir_if_not(path.join(OUT_DIR, SEG_TYPES[1] + '_' + OUT_TYPES[1]))
+            makedirs(path.join(OUT_DIR, SEG_TYPES[0] + '_' + OUT_TYPES[0]), exist_ok=True)
+            makedirs(path.join(OUT_DIR, SEG_TYPES[0] + '_' + OUT_TYPES[1]), exist_ok=True)
+            makedirs(path.join(OUT_DIR, SEG_TYPES[1] + '_' + OUT_TYPES[0]), exist_ok=True)
+            makedirs(path.join(OUT_DIR, SEG_TYPES[1] + '_' + OUT_TYPES[1]), exist_ok=True)
         else:
-            _mkdir_if_not(path.join(OUT_DIR, seg_type + '_' + OUT_TYPES[0]))
-            _mkdir_if_not(path.join(OUT_DIR, seg_type + '_' + OUT_TYPES[1]))
+            makedirs(path.join(OUT_DIR, seg_type + '_' + OUT_TYPES[0]), exist_ok=True)
+            makedirs(path.join(OUT_DIR, seg_type + '_' + OUT_TYPES[1]), exist_ok=True)
     else:
         if seg_type == SEG_TYPES[2]:
-            _mkdir_if_not(path.join(OUT_DIR, SEG_TYPES[0] + '_' + out_type))
-            _mkdir_if_not(path.join(OUT_DIR, SEG_TYPES[1] + '_' + out_type))
+            makedirs(path.join(OUT_DIR, SEG_TYPES[0] + '_' + out_type), exist_ok=True)
+            makedirs(path.join(OUT_DIR, SEG_TYPES[1] + '_' + out_type), exist_ok=True)
         else:
-            _mkdir_if_not(path.join(OUT_DIR, seg_type + '_' + out_type))
+            makedirs(path.join(OUT_DIR, seg_type + '_' + out_type), exist_ok=True)
 
     cell_metadata = {}
 
@@ -336,7 +330,7 @@ def export_cells(
 
     if residue_regions is not None:
         RES_DIR = path.join(OUT_DIR, 'residue')
-        _mkdir_if_not(RES_DIR)
+        makedirs(RES_DIR, exist_ok=True)
         for (obj, region) in enumerate(residue_regions):
             if low_vol_cutoff <= region['vol']:  # for postprocessing
                 minz, miny, minx, maxz, maxy, maxx = region['bbox']
