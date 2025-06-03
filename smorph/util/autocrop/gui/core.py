@@ -620,6 +620,27 @@ def _auto_params_deconv(pipe):
             refr_index = refr_index,
             pinhole_radius = pinhole_radius
         )
+    elif impath.lower().split('.')[-1] == 'nd2':
+        try:
+            im_meta = pipe.metadata['images'][0]['pixels']['channels']
+            im_meta = im_meta if not isinstance(im_meta, list) else im_meta[pipe.channel_interest]
+
+            emission_wl = im_meta.get('emission_wavelength')
+            emission_wl = emission_wl if emission_wl is not None else 0
+
+            excitation_wl = im_meta.get('excitation_wavelength')
+            excitation_wl = excitation_wl if excitation_wl is not None else 0
+
+            return dict(
+                ex_wavelen = excitation_wl,
+                em_wavelen = emission_wl,
+                num_aperture = im_meta.get('num_aperture', 0),
+                refr_index = im_meta.get('refr_index', 1.0003),
+                pinhole_radius = im_meta.get('pinhole_size', 0) / 2  # in microns
+            )
+        except Exception as e:
+            print(f"ND2 metadata extraction failed: {e}")
+
     return None
 
 

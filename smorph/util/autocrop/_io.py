@@ -75,7 +75,7 @@ def _import_image(im_path, channel_interest):
 def imread(im_path, ref_path=None, channel_interest=0):
     """Loads the image & scale.
 
-    - Tested on: CZI, IMS, LIF, LSM, TIFF.
+    - Tested on: CZI, IMS, LIF, LSM, TIFF, ND2.
 
     Parameters
     ----------
@@ -92,7 +92,7 @@ def imread(im_path, ref_path=None, channel_interest=0):
     # image has to be converted to float for processing
     im, scale, metadata = _import_image(im_path, channel_interest)
 
-    im = im if im.ndim == 3 else np.expand_dims(img, 0)
+    im = im if im.ndim == 3 else np.expand_dims(im, 0)
 
     if not(ref_path in (None, '')):
         ref_im = _import_image(ref_path, channel_interest)[0]
@@ -134,7 +134,8 @@ def export_cells(
     seg_type='segmented',
     roi_name='',
     roi_polygon=None,
-    roi_path=''
+    roi_path='',
+    metadata_additional=None
 ):
     """Exports cropped cells.
 
@@ -201,7 +202,7 @@ def export_cells(
         else:
             makedirs(path.join(OUT_DIR, seg_type + '_' + out_type), exist_ok=True)
 
-    cell_metadata = {}
+    cell_metadata = {} if metadata_additional is None else metadata_additional.copy()
 
     if img_path.split('.')[-1] == 'tif':
         with tifffile.TiffFile(img_path) as file:

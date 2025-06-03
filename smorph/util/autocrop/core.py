@@ -632,17 +632,18 @@ class TissueImage:
         that contains it.
 
     """
-    __slots__ = ('im_path', 'DECONV_ITR', 'CLIP_LIMIT', 'ROI_PATH', 'ROI_NAME',
-            'SCALE', 'imoriginal', 'impreprocessed', 'imsegmented', 'labels', 'imbinary',
-            'REF_IM_PATH', 'REF_ROI_PATH', 'refdenoised', "skip_preprocess",
-            'roi_polygon', 'in_box', 'regions', 'residue', 'OUT_DIR',
-            'LOW_THRESH', 'HIGH_THRESH', 'LOW_AUTO_THRESH', 'HIGH_AUTO_THRESH',
-            'n_region', 'PROPS', 'metadata',
-            'filtered_regions',  # watershed cache
-            'LOW_VOLUME_CUTOFF', 'HIGH_VOLUME_CUTOFF', 'OUT_DIMS', 'SEGMENT_TYPE',  # export cells
-            'label_diff',  # reproducibility of manual label refinement
-            'somas_estimates', 'ALL_PT_ESTIMATES', 'FINAL_PT_ESTIMATES'  # reproducibility of watershed label refinement
-            )
+    __slots__ = (
+        'im_path', 'DECONV_ITR', 'CLIP_LIMIT', 'ROI_PATH', 'ROI_NAME',
+        'SCALE', 'imoriginal', 'impreprocessed', 'imsegmented', 'labels', 'imbinary',
+        'REF_IM_PATH', 'channel_interest', 'REF_ROI_PATH', 'refdenoised', "skip_preprocess",
+        'roi_polygon', 'in_box', 'regions', 'residue', 'OUT_DIR',
+        'LOW_THRESH', 'HIGH_THRESH', 'LOW_AUTO_THRESH', 'HIGH_AUTO_THRESH',
+        'n_region', 'PROPS', 'metadata',
+        'filtered_regions',  # watershed cache
+        'LOW_VOLUME_CUTOFF', 'HIGH_VOLUME_CUTOFF', 'OUT_DIMS', 'SEGMENT_TYPE',  # export cells
+        'label_diff',  # reproducibility of manual label refinement
+        'somas_estimates', 'ALL_PT_ESTIMATES', 'FINAL_PT_ESTIMATES'  # reproducibility of watershed label refinement
+    )
 
     def __init__(
         self,
@@ -661,6 +662,7 @@ class TissueImage:
             raise ValueError('Load ROI properly')
         self.im_path = im_path
         self.REF_IM_PATH = ref_im_path
+        self.channel_interest = channel
         imoriginal, SCALE, metadata = imread(im_path, ref_im_path, channel)
         self.imoriginal, self.SCALE = imoriginal, SCALE
         self.impreprocessed = imoriginal
@@ -1810,7 +1812,8 @@ class TissueImage:
             self.imsegmented = reconstructed_cells
             export_cells(self.im_path, self.LOW_VOLUME_CUTOFF,
                          self.HIGH_VOLUME_CUTOFF, output_option, self.impreprocessed,
-                         self.regions, None, segment_type, self.ROI_NAME, self.roi_polygon)
+                         self.regions, None, segment_type, self.ROI_NAME, self.roi_polygon,
+                         metadata_additional=dict(channel_interest=self.channel_interest))
 
             params = {
                 'NAME_ROI': self.ROI_NAME,
