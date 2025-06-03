@@ -661,6 +661,7 @@ class TissueImage:
             raise ValueError('Load ROI properly')
         self.im_path = im_path
         self.REF_IM_PATH = ref_im_path
+        self.channel_interest = channel
         imoriginal, SCALE, metadata = imread(im_path, ref_im_path, channel)
         self.imoriginal, self.SCALE = imoriginal, SCALE
         self.impreprocessed = imoriginal
@@ -1845,3 +1846,84 @@ class TissueImage:
         else:
             vol_cutoff_update()
             export(out_dims, segment_type)
+
+    def get_enhanced_metadata(self):
+        """
+        Get enhanced metadata information using the MetadataExtractor.
+        
+        Returns
+        -------
+        dict
+            Enhanced metadata information for the current channel
+        """
+        try:
+            from .metadata_utils import MetadataExtractor
+            file_ext = self.im_path.lower().split('.')[-1]
+            extractor = MetadataExtractor(self.metadata, file_ext)
+            return extractor.get_channel_info(self.channel_interest)
+        except ImportError:
+            return {}
+        except Exception as e:
+            print(f"Failed to get enhanced metadata: {e}")
+            return {}
+    
+    def get_all_channels_metadata(self):
+        """
+        Get metadata information for all channels.
+        
+        Returns
+        -------
+        list
+            List of dictionaries containing metadata for each channel
+        """
+        try:
+            from .metadata_utils import get_channel_summary
+            file_ext = self.im_path.lower().split('.')[-1]
+            return get_channel_summary(self.metadata, file_ext)
+        except ImportError:
+            return []
+        except Exception as e:
+            print(f"Failed to get channels metadata: {e}")
+            return []
+    
+    def get_deconvolution_params(self):
+        """
+        Get deconvolution parameters for the current channel.
+        
+        Returns
+        -------
+        dict or None
+            Dictionary containing deconvolution parameters or None if extraction fails
+        """
+        try:
+            from .metadata_utils import extract_deconv_params
+            file_ext = self.im_path.lower().split('.')[-1]
+            return extract_deconv_params(self.metadata, self.channel_interest, file_ext)
+        except ImportError:
+            return None
+        except Exception as e:
+            print(f"Failed to get deconvolution parameters: {e}")
+            return None
+
+    def print_metadata_summary(self):
+        """Print a summary of available metadata."""
+        enhanced_meta = self.get_enhanced_metadata()
+        all_channels = self.get_all_channels_metadata()
+        
+        print(f"Image: {self.im_path}")
+        print(f"Current channel: {self.channel_interest}")
+        print(f"Physical pixel size: {self.SCALE}")
+        
+        if enhanced_meta:
+            print("\nCurrent Channel Metadata:")
+            for key, value in enhanced_meta.items():
+                if value:
+                    print(f"  {key}: {value}")
+        
+        if all_channels:
+            print(f"\nAll Channels ({len(all_channels)} total):")
+            for i, ch_meta in enumerate(all_channels):
+                name = ch_meta.get('name', f'Channel_{i}')
+                ex_wl = ch_meta.get('excitation_wavelength', 'N/A')
+                em_wl = ch_meta.get('emission_wavelength', 'N/A')
+                print(f"  {i}: {name} (Ex: {ex_wl}nm, Em: {em_wl}nm)")

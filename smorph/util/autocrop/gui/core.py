@@ -588,38 +588,118 @@ class InteractiveSegmentation:
 
 
 def _auto_params_deconv(pipe):
+    """
+    Enhanced deconvolution parameter extraction using rich metadata structures.
+    
+    This function now utilizes the comprehensive metadata available from various
+    microscopy file formats to extract accurate imaging parameters for deconvolution.
+    
+    Parameters
+    ----------
+    pipe : TissueImage
+        Pipeline object containing image metadata and channel information
+        
+    Returns
+    -------
+    dict or None
+        Dictionary containing deconvolution parameters:
+        - ex_wavelen: Excitation wavelength in nm
+        - em_wavelen: Emission wavelength in nm  
+        - num_aperture: Numerical aperture
+        - refr_index: Refractive index
+        - pinhole_radius: Pinhole radius in µm
+    """
+    try:
+        from ..metadata_utils import extract_deconv_params
+        
+        # Try enhanced metadata extraction first
+        if hasattr(pipe, 'metadata') and pipe.metadata:
+            try:
+                # Determine file format from path
+                file_ext = pipe.im_path.lower().split('.')[-1]
+                
+                # Use enhanced metadata extractor
+                deconv_params = extract_deconv_params(
+                    pipe.metadata, 
+                    pipe.channel_interest, 
+                    file_ext
+                )
+                
+                if deconv_params and any(deconv_params.values()):
+                    return deconv_params
+                    
+            except Exception as e:
+                print(f"Enhanced metadata extraction failed: {e}")
+                # Fall back to legacy extraction
+    except ImportError:
+        print("Enhanced metadata utilities not available, using legacy extraction")
+    
+    # Legacy extraction methods for backward compatibility
     impath = pipe.im_path
     if impath.lower().split('.')[-1] == 'czi':
-        czimeta = czifile.CziFile(impath).metadata(False)
-        metadata = czimeta['ImageDocument']['Metadata']
-        im_meta = metadata['Information']['Image']
-        refr_index = im_meta['ObjectiveSettings']['RefractiveIndex']
+        try:
+            czimeta = czifile.CziFile(impath).metadata(False)
+            metadata = czimeta['ImageDocument']['Metadata']
+            im_meta = metadata['Information']['Image']
+            refr_index = im_meta['ObjectiveSettings']['RefractiveIndex']
 
-        selected_channel = None
-        for i in im_meta['Dimensions']['Channels']['Channel']:
-            if i['ContrastMethod'] == 'Fluorescence':
-                selected_channel = i
-        ex_wavelen = selected_channel['ExcitationWavelength']
-        em_wavelen = selected_channel['EmissionWavelength']
+            selected_channel = None
+            channels = im_meta['Dimensions']['Channels']['Channel']
+            if isinstance(channels, list):
+                for i in channels:
+                    if i.get('ContrastMethod') == 'Fluorescence':
+                        selected_channel = i
+                        break
+                if not selected_channel and channels:
+                    selected_channel = channels[pipe.channel_interest] if pipe.channel_interest < len(channels) else channels[0]
+            else:
+                selected_channel = channels
+                
+            ex_wavelen = selected_channel.get('ExcitationWavelength', 0) if selected_channel else 0
+            em_wavelen = selected_channel.get('EmissionWavelength', 0) if selected_channel else 0
 
-        selected_detector = None
-        for i in metadata['Experiment']['ExperimentBlocks']['AcquisitionBlock'
-            ]['MultiTrackSetup']['TrackSetup']['Detectors']['Detector']:  # [channel]['Detectors']['Detector']:
-            if i['PinholeDiameter'] > 0:
-                selected_detector = i
-        pinhole_radius = selected_detector['PinholeDiameter'] / 2 * 1e6
+            selected_detector = None
+            try:
+                detectors = metadata['Experiment']['ExperimentBlocks']['AcquisitionBlock']['MultiTrackSetup']['TrackSetup']['Detectors']['Detector']
+                if isinstance(detectors, list):
+                    for i in detectors:
+                        if i.get('PinholeDiameter', 0) > 0:
+                            selected_detector = i
+                            break
+                    if not selected_detector and detectors:
+                        selected_detector = detectors[0]
+                else:
+                    selected_detector = detectors
+            except (KeyError, TypeError):
+                selected_detector = None
+                
+            pinhole_radius = selected_detector.get('PinholeDiameter', 0) / 2 * 1e6 if selected_detector else 0
 
-        num_aperture = metadata['Information']['Instrument']['Objectives'][
-            'Objective']['LensNA']
-        # dim_r = metadata['Scaling']['Items']['Distance'][0]['Value'] * 1e6
+            num_aperture = metadata['Information']['Instrument']['Objectives']['Objective'].get('LensNA', 0)
 
-        return dict(
-            ex_wavelen = ex_wavelen,
-            em_wavelen = em_wavelen,
-            num_aperture = num_aperture,
-            refr_index = refr_index,
-            pinhole_radius = pinhole_radius
-        )
+            return dict(
+                ex_wavelen = ex_wavelen,
+                em_wavelen = em_wavelen,
+                num_aperture = num_aperture,
+                refr_index = refr_index,
+                pinhole_radius = pinhole_radius
+            )
+        except Exception as e:
+            print(f"CZI metadata extraction failed: {e}")
+            
+    elif impath.lower().split('.')[-1] == 'nd2':
+        try:
+            im_meta = pipe.metadata[pipe.channel_interest] if isinstance(pipe.metadata, list) else pipe.metadata
+            return dict(
+                ex_wavelen = im_meta.get('excitation_wavelength', 0),
+                em_wavelen = im_meta.get('emission_wavelength', 0),
+                num_aperture = im_meta.get('num_aperture', 0),
+                refr_index = im_meta.get('refr_index', 1.33),
+                pinhole_radius = im_meta.get('pinhole_size', 0) / 2 * 1e6
+            )
+        except Exception as e:
+            print(f"ND2 metadata extraction failed: {e}")
+
     return None
 
 

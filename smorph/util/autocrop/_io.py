@@ -75,7 +75,7 @@ def _import_image(im_path, channel_interest):
 def imread(im_path, ref_path=None, channel_interest=0):
     """Loads the image & scale.
 
-    - Tested on: CZI, IMS, LIF, LSM, TIFF.
+    - Tested on: CZI, IMS, LIF, LSM, TIFF, ND2.
 
     Parameters
     ----------
@@ -92,7 +92,7 @@ def imread(im_path, ref_path=None, channel_interest=0):
     # image has to be converted to float for processing
     im, scale, metadata = _import_image(im_path, channel_interest)
 
-    im = im if im.ndim == 3 else np.expand_dims(img, 0)
+    im = im if im.ndim == 3 else np.expand_dims(im, 0)
 
     if not(ref_path in (None, '')):
         ref_im = _import_image(ref_path, channel_interest)[0]
@@ -366,3 +366,192 @@ def export_cells(
                     software='Autocrop'
                 )
                 roi.tofile(out_name + '.roi')
+
+def get_image_metadata_summary(im_path):
+    """
+    Get a comprehensive summary of image metadata without loading the full image.
+    
+    Parameters
+    ----------
+    im_path : str
+        Path to the microscopy image file
+        
+    Returns
+    -------
+    dict
+        Dictionary containing metadata summary including:
+        - file_format: Detected file format
+        - num_channels: Number of channels
+        - image_shape: Image dimensions
+        - physical_pixel_sizes: Physical pixel sizes
+        - channels_info: List of channel information
+    """
+    try:
+        from aicsimageio import AICSImage
+        from xml.etree import ElementTree
+        from ome_types.model import ome
+        
+        # Load image metadata only
+        imfile = AICSImage(im_path)
+        
+        # Basic image information
+        summary = {
+            'file_path': im_path,
+            'file_format': im_path.split('.')[-1].lower(),
+            'num_channels': imfile.dims.C,
+            'image_shape': {
+                'X': imfile.dims.X,
+                'Y': imfile.dims.Y, 
+                'Z': imfile.dims.Z,
+                'T': imfile.dims.T,
+                'C': imfile.dims.C
+            },
+            'physical_pixel_sizes': {
+                'X': imfile.physical_pixel_sizes.X,
+                'Y': imfile.physical_pixel_sizes.Y,
+                'Z': imfile.physical_pixel_sizes.Z
+            }
+        }
+        
+        # Process metadata
+        if isinstance(imfile.metadata, ElementTree.Element):
+            metadata = etree_to_dict(imfile.metadata)
+        elif isinstance(imfile.metadata, ome.OME):
+            metadata = imfile.metadata.dict()
+        else:
+            metadata = imfile.metadata
+            
+        # Extract channel information using enhanced metadata utilities
+        try:
+            from .metadata_utils import get_channel_summary
+            channels_info = get_channel_summary(metadata, summary['file_format'])
+            summary['channels_info'] = channels_info
+        except ImportError:
+            summary['channels_info'] = []
+            
+        return summary
+        
+    except Exception as e:
+        return {
+            'file_path': im_path,
+            'error': str(e),
+            'file_format': im_path.split('.')[-1].lower() if '.' in im_path else 'unknown'
+        }
+
+
+def compare_image_metadata(im_paths):
+    """
+    Compare metadata across multiple images for batch processing insights.
+    
+    Parameters
+    ----------
+    im_paths : list of str
+        List of image file paths
+        
+    Returns
+    -------
+    dict
+        Dictionary containing comparison results
+    """
+    if not isinstance(im_paths, (list, tuple)):
+        im_paths = [im_paths]
+        
+    summaries = []
+    for path in im_paths:
+        summary = get_image_metadata_summary(path)
+        summaries.append(summary)
+    
+    # Analyze commonalities and differences
+    comparison = {
+        'num_images': len(summaries),
+        'file_formats': list(set(s.get('file_format', 'unknown') for s in summaries)),
+        'common_channels': None,
+        'pixel_size_ranges': {},
+        'shape_ranges': {},
+        'summaries': summaries
+    }
+    
+    # Find common channel configurations
+    if summaries and 'channels_info' in summaries[0]:
+        # Check if all images have same number of channels
+        channel_counts = [len(s.get('channels_info', [])) for s in summaries]
+        if len(set(channel_counts)) == 1 and channel_counts[0] > 0:
+            # Extract common channel properties
+            common_channels = []
+            for ch_idx in range(channel_counts[0]):
+                ch_names = []
+                ex_wavelengths = []
+                em_wavelengths = []
+                
+                for summary in summaries:
+                    channels = summary.get('channels_info', [])
+                    if ch_idx < len(channels):
+                        ch = channels[ch_idx]
+                        ch_names.append(ch.get('name', 'Unknown'))
+                        if 'excitation_wavelength' in ch:
+                            ex_wavelengths.append(ch['excitation_wavelength'])
+                        if 'emission_wavelength' in ch:
+                            em_wavelengths.append(ch['emission_wavelength'])
+                
+                common_ch = {
+                    'index': ch_idx,
+                    'names': list(set(ch_names)),
+                    'excitation_range': (min(ex_wavelengths), max(ex_wavelengths)) if ex_wavelengths else None,
+                    'emission_range': (min(em_wavelengths), max(em_wavelengths)) if em_wavelengths else None
+                }
+                common_channels.append(common_ch)
+                
+            comparison['common_channels'] = common_channels
+    
+    # Analyze pixel size ranges
+    x_sizes = [s.get('physical_pixel_sizes', {}).get('X') for s in summaries if s.get('physical_pixel_sizes', {}).get('X')]
+    y_sizes = [s.get('physical_pixel_sizes', {}).get('Y') for s in summaries if s.get('physical_pixel_sizes', {}).get('Y')]
+    z_sizes = [s.get('physical_pixel_sizes', {}).get('Z') for s in summaries if s.get('physical_pixel_sizes', {}).get('Z')]
+    
+    if x_sizes:
+        comparison['pixel_size_ranges']['X'] = (min(x_sizes), max(x_sizes))
+    if y_sizes:
+        comparison['pixel_size_ranges']['Y'] = (min(y_sizes), max(y_sizes))
+    if z_sizes:
+        comparison['pixel_size_ranges']['Z'] = (min(z_sizes), max(z_sizes))
+    
+    return comparison
+
+
+def print_metadata_comparison(comparison):
+    """
+    Print a formatted comparison of image metadata.
+    
+    Parameters
+    ----------
+    comparison : dict
+        Result from compare_image_metadata
+    """
+    print(f"=== Metadata Comparison for {comparison['num_images']} Images ===")
+    print(f"File formats: {', '.join(comparison['file_formats'])}")
+    
+    if comparison['pixel_size_ranges']:
+        print("\nPixel size ranges:")
+        for dim, (min_val, max_val) in comparison['pixel_size_ranges'].items():
+            print(f"  {dim}: {min_val:.4f} - {max_val:.4f} µm")
+    
+    if comparison['common_channels']:
+        print(f"\nCommon channel structure ({len(comparison['common_channels'])} channels):")
+        for ch in comparison['common_channels']:
+            names = ', '.join(ch['names']) if len(ch['names']) > 1 else ch['names'][0]
+            print(f"  Channel {ch['index']}: {names}")
+            if ch['excitation_range']:
+                ex_min, ex_max = ch['excitation_range']
+                print(f"    Excitation: {ex_min}-{ex_max} nm")
+            if ch['emission_range']:
+                em_min, em_max = ch['emission_range']
+                print(f"    Emission: {em_min}-{em_max} nm")
+    
+    print(f"\nIndividual summaries:")
+    for i, summary in enumerate(comparison['summaries']):
+        if 'error' in summary:
+            print(f"  {i+1}. {summary['file_path']}: ERROR - {summary['error']}")
+        else:
+            shape = summary['image_shape']
+            print(f"  {i+1}. {summary['file_path']}")
+            print(f"     Shape: {shape['X']}x{shape['Y']}x{shape['Z']} ({shape['C']} channels)")
