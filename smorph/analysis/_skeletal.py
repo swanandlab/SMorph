@@ -1,10 +1,23 @@
 import numpy as np
 from scipy.ndimage import generate_binary_structure, label
-from skan import skeleton_to_csgraph
-from skan.csr import Skeleton, branch_statistics
+from skan import csr
+from skan.csr import Skeleton, skeleton_to_csgraph
 from skimage.feature import blob_log
 from skimage.morphology import convex_hull_image
 from skimage.util import invert
+
+
+def branch_statistics(
+        skeleton_image, *, spacing=1, value_is_height=False
+        ):
+    skel = csr.Skeleton(
+            skeleton_image, spacing=spacing, value_is_height=value_is_height
+            )
+    summary = csr.summarize(
+            skel, value_is_height=value_is_height, separator='_'
+            )
+    columns = ['node_id_src', 'node_id_dst', 'branch_distance', 'branch_type']
+    return summary[columns].to_numpy()
 
 
 def _get_blobs(cell_image, image_type):
